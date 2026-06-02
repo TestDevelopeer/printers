@@ -26,11 +26,7 @@ class NetworkScannerService
         $hosts = $this->hostsFromCidr($cidr);
         $results = [];
 
-        foreach ($hosts as $ipAddress) {
-            if (! $this->isHostReachable($ipAddress, $timeoutMs)) {
-                continue;
-            }
-
+        foreach ($this->reachableHosts($hosts, $timeoutMs) as $ipAddress) {
             $discovered = $this->printerSnmpService->discover($ipAddress, $community, $timeoutMs);
 
             if ($discovered !== null) {
@@ -120,21 +116,62 @@ class NetworkScannerService
 
     private function estimateScanDurationSeconds(int $hostCount, int $timeoutMs): int
     {
-        $estimatedRequestsPerHost = max(1, (int) config('printers.scan_estimated_requests_per_host', 8));
-        $estimatedMilliseconds = $hostCount * $timeoutMs * (1 + $estimatedRequestsPerHost);
+        $pingConcurrency = max(1, (int) config('printers.scan_ping_concurrency', 32));
+        $estimatedSnmpHosts = max(1, min($hostCount, (int) config('printers.scan_estimated_snmp_hosts', 16)));
+        $estimatedSnmpSecondsPerHost = max(0.25, (float) config('printers.scan_estimated_snmp_seconds_per_host', 2));
+
+        $pingMilliseconds = (int) ceil($hostCount / $pingConcurrency) * $timeoutMs;
+        $snmpMilliseconds = (int) ceil($estimatedSnmpHosts * $estimatedSnmpSecondsPerHost * 1000);
+        $estimatedMilliseconds = $pingMilliseconds + $snmpMilliseconds;
 
         return (int) max(1, ceil($estimatedMilliseconds / 1000));
     }
 
+    /**
+     * @param  array<int, string>  $hosts
+     * @return array<int, string>
+     */
+    private function reachableHosts(array $hosts, int $timeoutMs): array
+    {
+        $concurrency = max(1, (int) config('printers.scan_ping_concurrency', 32));
+        $reachableHosts = [];
+
+        foreach (array_chunk($hosts, $concurrency) as $chunk) {
+            $processes = [];
+
+            foreach ($chunk as $ipAddress) {
+                $process = new Process($this->pingCommand($ipAddress, $timeoutMs));
+                $process->start();
+                $processes[$ipAddress] = $process;
+            }
+
+            foreach ($processes as $ipAddress => $process) {
+                $process->wait();
+
+                if ($process->isSuccessful()) {
+                    $reachableHosts[] = $ipAddress;
+                }
+            }
+        }
+
+        return $reachableHosts;
+    }
+
     private function isHostReachable(string $ipAddress, int $timeoutMs): bool
     {
-        $command = PHP_OS_FAMILY === 'Windows'
-            ? ['ping', '-n', '1', '-w', (string) $timeoutMs, $ipAddress]
-            : ['ping', '-c', '1', '-W', (string) max(1, (int) ceil($timeoutMs / 1000)), $ipAddress];
-
-        $process = new Process($command);
+        $process = new Process($this->pingCommand($ipAddress, $timeoutMs));
         $process->run();
 
         return $process->isSuccessful();
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function pingCommand(string $ipAddress, int $timeoutMs): array
+    {
+        return PHP_OS_FAMILY === 'Windows'
+            ? ['ping', '-n', '1', '-w', (string) $timeoutMs, $ipAddress]
+            : ['ping', '-c', '1', '-W', (string) max(1, (int) ceil($timeoutMs / 1000)), $ipAddress];
     }
 }
