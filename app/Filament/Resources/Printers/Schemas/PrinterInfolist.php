@@ -2,8 +2,6 @@
 
 namespace App\Filament\Resources\Printers\Schemas;
 
-use App\Models\Cartridge;
-use App\Models\CartridgeSet;
 use App\Models\TonerSupply;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -69,28 +67,30 @@ class PrinterInfolist
                             ])
                             ->columns(2),
                     ]),
-                Section::make('Cartridge sets')
+                Section::make('Cartridge history')
                     ->schema([
-                        RepeatableEntry::make('cartridgeSets')
+                        RepeatableEntry::make('tonerHistory')
                             ->label('')
                             ->schema([
-                                TextEntry::make('name')
-                                    ->state(fn (CartridgeSet $record): string => $record->name),
-                                TextEntry::make('description')
-                                    ->placeholder('No description'),
-                                RepeatableEntry::make('cartridges')
-                                    ->label('Cartridges')
-                                    ->schema([
-                                        TextEntry::make('name')
-                                            ->state(fn (Cartridge $record): string => $record->name),
-                                        TextEntry::make('color_label')
-                                            ->state(fn (Cartridge $record): string => $record->color_label),
-                                        TextEntry::make('part_number')->label('Part number')->placeholder('Not set'),
-                                        TextEntry::make('notes')->placeholder('No notes'),
-                                    ])
-                                    ->columns(2),
+                                TextEntry::make('color_label')
+                                    ->label('Color')
+                                    ->state(fn (TonerSupply $record): string => $record->color_label),
+                                TextEntry::make('snmp_description')
+                                    ->label('Description')
+                                    ->placeholder('Unknown'),
+                                TextEntry::make('percentage_display')
+                                    ->label('Last level')
+                                    ->state(fn (TonerSupply $record): string => $record->percentage_display),
+                                TextEntry::make('last_seen_at')
+                                    ->label('Last seen installed')
+                                    ->dateTime()
+                                    ->placeholder('Unknown'),
+                                TextEntry::make('removed_at')
+                                    ->label('Moved to history')
+                                    ->dateTime()
+                                    ->placeholder('Unknown'),
                             ])
-                            ->columns(1),
+                            ->columns(2),
                     ]),
             ]);
     }

@@ -3,8 +3,6 @@
 namespace App\Filament\Resources\Printers\Schemas;
 
 use App\Enums\PrinterStatus;
-use App\Filament\Resources\Printers\PrinterResource;
-use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
@@ -67,42 +65,6 @@ class PrinterForm
                             ->columnSpanFull(),
                     ])
                     ->columns(2),
-                Section::make('Cartridge sets')
-                    ->description('Manage compatible cartridge sets directly on the printer form.')
-                    ->schema([
-                        Repeater::make('cartridgeSets')
-                            ->relationship()
-                            ->defaultItems(0)
-                            ->schema([
-                                TextInput::make('name')
-                                    ->required()
-                                    ->maxLength(255),
-                                Textarea::make('description')
-                                    ->rows(2)
-                                    ->columnSpanFull(),
-                                Repeater::make('cartridges')
-                                    ->relationship()
-                                    ->defaultItems(0)
-                                    ->schema([
-                                        TextInput::make('name')
-                                            ->required()
-                                            ->maxLength(255),
-                                        Select::make('color')
-                                            ->required()
-                                            ->default('other')
-                                            ->options(PrinterResource::tonerColorOptions()),
-                                        TextInput::make('part_number')
-                                            ->label('Part number'),
-                                        Textarea::make('notes')
-                                            ->rows(2)
-                                            ->columnSpanFull(),
-                                    ])
-                                    ->columns(3)
-                                    ->columnSpanFull(),
-                            ])
-                            ->columns(2)
-                            ->columnSpanFull(),
-                    ]),
             ]);
     }
 }

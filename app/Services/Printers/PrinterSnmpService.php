@@ -149,6 +149,7 @@ class PrinterSnmpService
             $known = $percentage !== null && $levelInt !== null && $capacityInt !== null && $levelInt >= 0;
 
             $supplies[] = [
+                'slot_key' => $suffix,
                 'color' => $this->guessColor($description)->value,
                 'snmp_description' => $description,
                 'level' => $levelInt,
@@ -157,6 +158,7 @@ class PrinterSnmpService
                 'unit' => 'percent',
                 'is_known' => $known,
                 'raw_value' => [
+                    'slot_key' => $suffix,
                     'description' => $description,
                     'level' => $level,
                     'max_capacity' => $capacity,

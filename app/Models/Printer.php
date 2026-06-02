@@ -43,7 +43,26 @@ class Printer extends Model
 
     public function tonerSupplies(): HasMany
     {
-        return $this->hasMany(TonerSupply::class);
+        return $this->hasMany(TonerSupply::class)
+            ->whereNull('removed_at')
+            ->orderBy('color')
+            ->orderBy('snmp_description');
+    }
+
+    public function tonerHistory(): HasMany
+    {
+        return $this->hasMany(TonerSupply::class)
+            ->whereNotNull('removed_at')
+            ->orderByDesc('removed_at')
+            ->orderBy('color')
+            ->orderBy('snmp_description');
+    }
+
+    public function allTonerSupplies(): HasMany
+    {
+        return $this->hasMany(TonerSupply::class)
+            ->orderBy('color')
+            ->orderBy('snmp_description');
     }
 
     public function cartridgeSets(): HasMany

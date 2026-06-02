@@ -14,6 +14,8 @@ class TonerSupply extends Model
 
     protected $fillable = [
         'printer_id',
+        'slot_key',
+        'supply_signature',
         'color',
         'snmp_description',
         'level',
@@ -22,6 +24,9 @@ class TonerSupply extends Model
         'unit',
         'is_known',
         'raw_value',
+        'installed_at',
+        'removed_at',
+        'last_seen_at',
     ];
 
     protected function casts(): array
@@ -30,6 +35,9 @@ class TonerSupply extends Model
             'color' => TonerColor::class,
             'is_known' => 'boolean',
             'raw_value' => 'array',
+            'installed_at' => 'datetime',
+            'removed_at' => 'datetime',
+            'last_seen_at' => 'datetime',
         ];
     }
 
@@ -61,5 +69,10 @@ class TonerSupply extends Model
     public function getPercentageDisplayAttribute(): string
     {
         return $this->percentage === null ? 'Unknown' : "{$this->percentage}%";
+    }
+
+    public function getIsInstalledAttribute(): bool
+    {
+        return $this->removed_at === null;
     }
 }
