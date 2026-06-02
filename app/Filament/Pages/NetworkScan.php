@@ -10,6 +10,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Throwable;
 
 class NetworkScan extends Page
 {
@@ -57,23 +58,33 @@ class NetworkScan extends Page
                         ->default(config('printers.scan_timeout', 1000)),
                 ])
                 ->action(function (array $data, NetworkScannerService $networkScannerService): void {
-                    $this->lastScanOptions = $data;
-                    $this->selectedResults = [];
+                    try {
+                        $this->lastScanOptions = $data;
+                        $this->selectedResults = [];
 
-                    $this->scanResults = array_map(
-                        static fn (DiscoveredPrinterData $result): array => $result->toArray(),
-                        $networkScannerService->scan(
-                            $data['cidr'],
-                            $data['community'],
-                            (int) $data['timeout'],
-                        ),
-                    );
+                        $this->scanResults = array_map(
+                            static fn (DiscoveredPrinterData $result): array => $result->toArray(),
+                            $networkScannerService->scan(
+                                $data['cidr'],
+                                $data['community'],
+                                (int) $data['timeout'],
+                            ),
+                        );
 
-                    Notification::make()
-                        ->title('Scan completed')
-                        ->body(sprintf('Found %d printer candidates.', count($this->scanResults)))
-                        ->success()
-                        ->send();
+                        Notification::make()
+                            ->title('Scan completed')
+                            ->body(sprintf('Found %d printer candidates.', count($this->scanResults)))
+                            ->success()
+                            ->send();
+                    } catch (Throwable $exception) {
+                        report($exception);
+
+                        Notification::make()
+                            ->title('Scan failed')
+                            ->body($exception->getMessage())
+                            ->danger()
+                            ->send();
+                    }
                 }),
         ];
     }
@@ -95,12 +106,22 @@ class NetworkScan extends Page
             return;
         }
 
-        $networkScannerService->import($selected->all());
+        try {
+            $networkScannerService->import($selected->all());
 
-        Notification::make()
-            ->title('Printers imported')
-            ->body(sprintf('Imported %d printers.', $selected->count()))
-            ->success()
-            ->send();
+            Notification::make()
+                ->title('Printers imported')
+                ->body(sprintf('Imported %d printers.', $selected->count()))
+                ->success()
+                ->send();
+        } catch (Throwable $exception) {
+            report($exception);
+
+            Notification::make()
+                ->title('Import failed')
+                ->body($exception->getMessage())
+                ->danger()
+                ->send();
+        }
     }
 }
