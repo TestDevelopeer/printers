@@ -59,6 +59,11 @@ class NetworkScan extends Page
                 ])
                 ->action(function (array $data, NetworkScannerService $networkScannerService): void {
                     try {
+                        $networkScannerService->assertCanRunSynchronously(
+                            $data['cidr'],
+                            (int) $data['timeout'],
+                        );
+
                         $this->lastScanOptions = $data;
                         $this->selectedResults = [];
 

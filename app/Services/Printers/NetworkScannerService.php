@@ -41,6 +41,26 @@ class NetworkScannerService
         return $results;
     }
 
+    public function assertCanRunSynchronously(string $cidr, ?int $timeoutMs = null): void
+    {
+        $timeoutMs ??= config('printers.scan_timeout', 1000);
+
+        $hostCount = count($this->hostsFromCidr($cidr));
+        $estimatedSeconds = $this->estimateScanDurationSeconds($hostCount, $timeoutMs);
+        $maxSeconds = max(1, (int) config('printers.scan_max_sync_seconds', 45));
+
+        if ($estimatedSeconds <= $maxSeconds) {
+            return;
+        }
+
+        throw new InvalidArgumentException(sprintf(
+            'CIDR range is too large for synchronous UI scanning. Estimated duration is about %d seconds for %d hosts at %d ms timeout. Reduce the range or use the CLI command printers:scan.',
+            $estimatedSeconds,
+            $hostCount,
+            $timeoutMs,
+        ));
+    }
+
     /**
      * @param  array<int, DiscoveredPrinterData>  $discoveredPrinters
      * @return array<int, Printer>
@@ -78,6 +98,17 @@ class NetworkScannerService
         $start = $network & (-1 << (32 - $prefix));
         $end = $start + $hostCount - 1;
 
+        if ($prefix === 32) {
+            return [long2ip($start)];
+        }
+
+        if ($prefix === 31) {
+            return [
+                long2ip($start),
+                long2ip($end),
+            ];
+        }
+
         $hosts = [];
 
         for ($current = $start + 1; $current < $end; $current++) {
@@ -85,6 +116,14 @@ class NetworkScannerService
         }
 
         return $hosts;
+    }
+
+    private function estimateScanDurationSeconds(int $hostCount, int $timeoutMs): int
+    {
+        $estimatedRequestsPerHost = max(1, (int) config('printers.scan_estimated_requests_per_host', 8));
+        $estimatedMilliseconds = $hostCount * $timeoutMs * (1 + $estimatedRequestsPerHost);
+
+        return (int) max(1, ceil($estimatedMilliseconds / 1000));
     }
 
     private function isHostReachable(string $ipAddress, int $timeoutMs): bool
