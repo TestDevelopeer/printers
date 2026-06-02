@@ -17,11 +17,14 @@ class PrinterSnmpService
     private const SUPPLIES_LEVEL = '1.3.6.1.2.1.43.11.1.1.9.1';
     private const SUPPLIES_CAPACITY = '1.3.6.1.2.1.43.11.1.1.8.1';
 
-    public function discover(
+    /**
+     * @return array{description: ?string, hostname: ?string, printer_name: ?string}|null
+     */
+    public function probe(
         string $ipAddress,
         ?string $community = null,
         ?int $timeoutMs = null,
-    ): ?DiscoveredPrinterData
+    ): ?array
     {
         $community ??= config('printers.default_snmp_community', 'public');
         $timeoutMs ??= config('printers.poll_timeout', 1000);
@@ -30,8 +33,35 @@ class PrinterSnmpService
 
         $description = $this->snmpGet($ipAddress, self::SYS_DESCR, $community, $timeoutMs);
         $hostname = $this->snmpGet($ipAddress, self::SYS_NAME, $community, $timeoutMs);
-        $location = $this->snmpGet($ipAddress, self::SYS_LOCATION, $community, $timeoutMs);
         $printerName = $this->snmpGet($ipAddress, self::PRINTER_NAME, $community, $timeoutMs);
+
+        if (! $printerName && ! $this->looksLikePrinter($description)) {
+            return null;
+        }
+
+        return [
+            'description' => $description,
+            'hostname' => $hostname,
+            'printer_name' => $printerName,
+        ];
+    }
+
+    public function discover(
+        string $ipAddress,
+        ?string $community = null,
+        ?int $timeoutMs = null,
+        ?array $probe = null,
+    ): ?DiscoveredPrinterData
+    {
+        $community ??= config('printers.default_snmp_community', 'public');
+        $timeoutMs ??= config('printers.poll_timeout', 1000);
+
+        $this->configureSnmp();
+
+        $description = $probe['description'] ?? $this->snmpGet($ipAddress, self::SYS_DESCR, $community, $timeoutMs);
+        $hostname = $probe['hostname'] ?? $this->snmpGet($ipAddress, self::SYS_NAME, $community, $timeoutMs);
+        $location = $this->snmpGet($ipAddress, self::SYS_LOCATION, $community, $timeoutMs);
+        $printerName = $probe['printer_name'] ?? $this->snmpGet($ipAddress, self::PRINTER_NAME, $community, $timeoutMs);
         $serialNumber = $this->snmpGet($ipAddress, self::SERIAL_NUMBER, $community, $timeoutMs);
 
         $tonerSupplies = $this->readTonerSupplies($ipAddress, $community, $timeoutMs);

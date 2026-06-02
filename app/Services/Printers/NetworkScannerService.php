@@ -5,6 +5,7 @@ namespace App\Services\Printers;
 use App\Models\Printer;
 use App\Services\Printers\Data\DiscoveredPrinterData;
 use InvalidArgumentException;
+use RuntimeException;
 use Symfony\Component\Process\Process;
 
 class NetworkScannerService
@@ -24,17 +25,12 @@ class NetworkScannerService
         $timeoutMs ??= config('printers.scan_timeout', 1000);
 
         $hosts = $this->hostsFromCidr($cidr);
-        $results = [];
 
-        foreach ($this->reachableHosts($hosts, $timeoutMs) as $ipAddress) {
-            $discovered = $this->printerSnmpService->discover($ipAddress, $community, $timeoutMs);
-
-            if ($discovered !== null) {
-                $results[] = $discovered;
-            }
+        if (count($hosts) <= 4 || ! function_exists('pcntl_fork')) {
+            return $this->scanChunk($hosts, $community, $timeoutMs);
         }
 
-        return $results;
+        return $this->scanInParallel($hosts, $community, $timeoutMs);
     }
 
     public function assertCanRunSynchronously(string $cidr, ?int $timeoutMs = null): void
@@ -116,12 +112,13 @@ class NetworkScannerService
 
     private function estimateScanDurationSeconds(int $hostCount, int $timeoutMs): int
     {
+        $scanConcurrency = max(1, (int) config('printers.scan_concurrency', 16));
         $pingConcurrency = max(1, (int) config('printers.scan_ping_concurrency', 32));
         $estimatedSnmpHosts = max(1, min($hostCount, (int) config('printers.scan_estimated_snmp_hosts', 16)));
         $estimatedSnmpSecondsPerHost = max(0.25, (float) config('printers.scan_estimated_snmp_seconds_per_host', 2));
 
         $pingMilliseconds = (int) ceil($hostCount / $pingConcurrency) * $timeoutMs;
-        $snmpMilliseconds = (int) ceil($estimatedSnmpHosts * $estimatedSnmpSecondsPerHost * 1000);
+        $snmpMilliseconds = (int) ceil($estimatedSnmpHosts / min($scanConcurrency, $estimatedSnmpHosts)) * (int) ceil($estimatedSnmpSecondsPerHost * 1000);
         $estimatedMilliseconds = $pingMilliseconds + $snmpMilliseconds;
 
         return (int) max(1, ceil($estimatedMilliseconds / 1000));
@@ -129,32 +126,103 @@ class NetworkScannerService
 
     /**
      * @param  array<int, string>  $hosts
-     * @return array<int, string>
+     * @return array<int, DiscoveredPrinterData>
      */
-    private function reachableHosts(array $hosts, int $timeoutMs): array
+    private function scanChunk(array $hosts, string $community, int $timeoutMs): array
     {
-        $concurrency = max(1, (int) config('printers.scan_ping_concurrency', 32));
-        $reachableHosts = [];
+        $results = [];
 
-        foreach (array_chunk($hosts, $concurrency) as $chunk) {
-            $processes = [];
+        foreach ($hosts as $ipAddress) {
+            $probe = $this->printerSnmpService->probe($ipAddress, $community, $timeoutMs);
 
-            foreach ($chunk as $ipAddress) {
-                $process = new Process($this->pingCommand($ipAddress, $timeoutMs));
-                $process->start();
-                $processes[$ipAddress] = $process;
+            if ($probe === null && ! $this->isHostReachable($ipAddress, $timeoutMs)) {
+                continue;
             }
 
-            foreach ($processes as $ipAddress => $process) {
-                $process->wait();
+            $probe ??= $this->printerSnmpService->probe($ipAddress, $community, $timeoutMs);
 
-                if ($process->isSuccessful()) {
-                    $reachableHosts[] = $ipAddress;
-                }
+            if ($probe === null) {
+                continue;
+            }
+
+            $discovered = $this->printerSnmpService->discover($ipAddress, $community, $timeoutMs, $probe);
+
+            if ($discovered !== null) {
+                $results[] = $discovered;
             }
         }
 
-        return $reachableHosts;
+        return $results;
+    }
+
+    /**
+     * @param  array<int, string>  $hosts
+     * @return array<int, DiscoveredPrinterData>
+     */
+    private function scanInParallel(array $hosts, string $community, int $timeoutMs): array
+    {
+        $workerCount = max(1, min((int) config('printers.scan_concurrency', 16), count($hosts)));
+        $chunks = array_chunk($hosts, (int) ceil(count($hosts) / $workerCount));
+        $tempFiles = [];
+        $children = [];
+
+        foreach ($chunks as $index => $chunk) {
+            $tempFile = tempnam(sys_get_temp_dir(), 'printer-scan-');
+
+            if ($tempFile === false) {
+                throw new RuntimeException('Failed to create a temporary file for scan results.');
+            }
+
+            $tempFiles[$index] = $tempFile;
+            $pid = pcntl_fork();
+
+            if ($pid === -1) {
+                throw new RuntimeException('Failed to fork scan worker process.');
+            }
+
+            if ($pid === 0) {
+                try {
+                    $serialized = array_map(
+                        static fn (DiscoveredPrinterData $printer): array => $printer->toArray(),
+                        $this->scanChunk($chunk, $community, $timeoutMs),
+                    );
+
+                    file_put_contents($tempFile, json_encode($serialized, JSON_THROW_ON_ERROR));
+                    exit(0);
+                } catch (\Throwable) {
+                    exit(1);
+                }
+            }
+
+            $children[$pid] = $tempFile;
+        }
+
+        $results = [];
+
+        foreach ($children as $pid => $tempFile) {
+            pcntl_waitpid($pid, $status);
+
+            if (pcntl_wexitstatus($status) !== 0) {
+                @unlink($tempFile);
+                continue;
+            }
+
+            $content = file_get_contents($tempFile);
+            @unlink($tempFile);
+
+            if ($content === false || $content === '') {
+                continue;
+            }
+
+            /** @var array<int, array<string, mixed>> $decoded */
+            $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+
+            foreach ($decoded as $row) {
+                $results[] = DiscoveredPrinterData::fromArray($row);
+            }
+        }
+
+        return $results;
     }
 
     private function isHostReachable(string $ipAddress, int $timeoutMs): bool

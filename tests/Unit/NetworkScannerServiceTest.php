@@ -14,6 +14,7 @@ class NetworkScannerServiceTest extends TestCase
     {
         config()->set('printers.scan_timeout', 1000);
         config()->set('printers.scan_max_sync_seconds', 15);
+        config()->set('printers.scan_concurrency', 16);
         config()->set('printers.scan_ping_concurrency', 32);
         config()->set('printers.scan_estimated_snmp_hosts', 16);
         config()->set('printers.scan_estimated_snmp_seconds_per_host', 2);
@@ -33,6 +34,7 @@ class NetworkScannerServiceTest extends TestCase
     {
         config()->set('printers.scan_timeout', 250);
         config()->set('printers.scan_max_sync_seconds', 90);
+        config()->set('printers.scan_concurrency', 16);
         config()->set('printers.scan_ping_concurrency', 32);
         config()->set('printers.scan_estimated_snmp_hosts', 16);
         config()->set('printers.scan_estimated_snmp_seconds_per_host', 2);
@@ -50,6 +52,7 @@ class NetworkScannerServiceTest extends TestCase
     public function test_it_supports_single_host_cidr_ranges(): void
     {
         config()->set('printers.scan_max_sync_seconds', 90);
+        config()->set('printers.scan_concurrency', 16);
         config()->set('printers.scan_ping_concurrency', 32);
         config()->set('printers.scan_estimated_snmp_hosts', 16);
         config()->set('printers.scan_estimated_snmp_seconds_per_host', 2);
@@ -68,6 +71,7 @@ class NetworkScannerServiceTest extends TestCase
     {
         config()->set('printers.scan_timeout', 1000);
         config()->set('printers.scan_max_sync_seconds', 90);
+        config()->set('printers.scan_concurrency', 16);
         config()->set('printers.scan_ping_concurrency', 32);
         config()->set('printers.scan_estimated_snmp_hosts', 16);
         config()->set('printers.scan_estimated_snmp_seconds_per_host', 2);
