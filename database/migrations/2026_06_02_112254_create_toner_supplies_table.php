@@ -1,0 +1,36 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        Schema::create('toner_supplies', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('printer_id')->constrained()->cascadeOnDelete();
+            $table->string('color')->default('unknown')->index();
+            $table->string('snmp_description')->nullable();
+            $table->integer('level')->nullable();
+            $table->integer('max_capacity')->nullable();
+            $table->unsignedTinyInteger('percentage')->nullable()->index();
+            $table->string('unit')->nullable();
+            $table->boolean('is_known')->default(false);
+            $table->json('raw_value')->nullable();
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('toner_supplies');
+    }
+};
