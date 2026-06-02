@@ -13,7 +13,7 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withSchedule(function (Schedule $schedule): void {
-        $schedule->command(PollPrintersCommand::class)->everyTenMinutes()->withoutOverlapping();
+        $schedule->command(PollPrintersCommand::class)->hourly()->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware) {
         //

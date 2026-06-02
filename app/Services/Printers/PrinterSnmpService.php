@@ -150,7 +150,7 @@ class PrinterSnmpService
 
             $supplies[] = [
                 'slot_key' => $suffix,
-                'color' => $this->guessColor($description)->value,
+                'color' => $this->detectColor($description)->value,
                 'snmp_description' => $description,
                 'level' => $levelInt,
                 'max_capacity' => $capacityInt,
@@ -229,18 +229,51 @@ class PrinterSnmpService
         ];
     }
 
-    private function guessColor(?string $description): TonerColor
+    public function detectColor(?string $description): TonerColor
     {
-        $description = strtolower((string) $description);
+        $description = trim((string) $description);
 
-        return match (true) {
-            str_contains($description, 'black') => TonerColor::Black,
-            str_contains($description, 'cyan') => TonerColor::Cyan,
-            str_contains($description, 'magenta') => TonerColor::Magenta,
-            str_contains($description, 'yellow') => TonerColor::Yellow,
-            str_contains($description, 'waste') => TonerColor::Waste,
-            $description !== '' => TonerColor::Other,
-            default => TonerColor::Unknown,
+        if ($description === '') {
+            return TonerColor::Unknown;
+        }
+
+        $normalized = mb_strtolower($description);
+
+        $keywords = [
+            [TonerColor::Waste, ['waste', 'waste toner', 'отработ', 'отработка', 'used toner']],
+            [TonerColor::Black, ['black', 'bk', 'k black', 'черный', 'чёрный']],
+            [TonerColor::Cyan, ['cyan', 'голуб', 'синий']],
+            [TonerColor::Magenta, ['magenta', 'маджента', 'пурпур']],
+            [TonerColor::Yellow, ['yellow', 'желт', 'жёлт']],
+        ];
+
+        foreach ($keywords as [$color, $variants]) {
+            foreach ($variants as $variant) {
+                if (str_contains($normalized, $variant)) {
+                    return $color;
+                }
+            }
+        }
+
+        if (preg_match('/(?:^|[\s\/\-_])([kcmy])(?:[\s\/\-_]|$)/iu', $description, $matches)) {
+            return $this->mapShortColorCode($matches[1]);
+        }
+
+        if (preg_match('/[a-z0-9\-]+([kcmy])$/iu', $description, $matches)) {
+            return $this->mapShortColorCode($matches[1]);
+        }
+
+        return TonerColor::Other;
+    }
+
+    private function mapShortColorCode(string $code): TonerColor
+    {
+        return match (mb_strtolower($code)) {
+            'k' => TonerColor::Black,
+            'c' => TonerColor::Cyan,
+            'm' => TonerColor::Magenta,
+            'y' => TonerColor::Yellow,
+            default => TonerColor::Other,
         };
     }
 }

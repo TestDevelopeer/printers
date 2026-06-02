@@ -16,9 +16,9 @@ class NetworkScan extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedMagnifyingGlass;
 
-    protected static ?string $navigationLabel = 'Network Scan';
+    protected static ?string $navigationLabel = 'Сканирование сети';
 
-    protected static ?string $title = 'Network Scan';
+    protected static ?string $title = 'Сканирование сети';
 
     protected string $view = 'filament.pages.network-scan';
 
@@ -41,7 +41,7 @@ class NetworkScan extends Page
     {
         return [
             Action::make('runScan')
-                ->label('Run scan')
+                ->label('Запустить сканирование')
                 ->icon('heroicon-m-magnifying-glass')
                 ->schema([
                     TextInput::make('cidr')
@@ -49,10 +49,11 @@ class NetworkScan extends Page
                         ->required()
                         ->default('192.168.1.0/24'),
                     TextInput::make('community')
+                        ->label('Community')
                         ->required()
                         ->default(config('printers.default_snmp_community', 'public')),
                     TextInput::make('timeout')
-                        ->label('Timeout (ms)')
+                        ->label('Таймаут (мс)')
                         ->numeric()
                         ->required()
                         ->default(config('printers.scan_timeout', 1000)),
@@ -77,15 +78,15 @@ class NetworkScan extends Page
                         );
 
                         Notification::make()
-                            ->title('Scan completed')
-                            ->body(sprintf('Found %d printer candidates.', count($this->scanResults)))
+                            ->title('Сканирование завершено')
+                            ->body(sprintf('Найдено кандидатов в принтеры: %d.', count($this->scanResults)))
                             ->success()
                             ->send();
                     } catch (Throwable $exception) {
                         report($exception);
 
                         Notification::make()
-                            ->title('Scan failed')
+                            ->title('Сканирование завершилось ошибкой')
                             ->body($exception->getMessage())
                             ->danger()
                             ->send();
@@ -104,7 +105,7 @@ class NetworkScan extends Page
 
         if ($selected->isEmpty()) {
             Notification::make()
-                ->title('Nothing selected')
+                ->title('Ничего не выбрано')
                 ->warning()
                 ->send();
 
@@ -115,15 +116,15 @@ class NetworkScan extends Page
             $networkScannerService->import($selected->all());
 
             Notification::make()
-                ->title('Printers imported')
-                ->body(sprintf('Imported %d printers.', $selected->count()))
+                ->title('Принтеры импортированы')
+                ->body(sprintf('Импортировано принтеров: %d.', $selected->count()))
                 ->success()
                 ->send();
         } catch (Throwable $exception) {
             report($exception);
 
             Notification::make()
-                ->title('Import failed')
+                ->title('Ошибка импорта')
                 ->body($exception->getMessage())
                 ->danger()
                 ->send();

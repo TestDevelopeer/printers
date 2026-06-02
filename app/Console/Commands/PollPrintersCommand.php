@@ -10,7 +10,7 @@ class PollPrintersCommand extends Command
 {
     protected $signature = 'printers:poll';
 
-    protected $description = 'Queue SNMP polling for all active printers.';
+    protected $description = 'Поставить в очередь SNMP-опрос всех активных принтеров.';
 
     public function handle(): int
     {
@@ -26,7 +26,7 @@ class PollPrintersCommand extends Command
                 }
             });
 
-        $this->info("Queued polling for {$count} printers.");
+        $this->info("Поставлено в очередь принтеров: {$count}.");
 
         return self::SUCCESS;
     }

@@ -2,28 +2,28 @@
     <div class="space-y-6">
         @if ($this->lastScanOptions !== [])
             <div class="rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
-                <div class="text-sm font-medium text-gray-900">Last scan</div>
+                <div class="text-sm font-medium text-gray-900">Последнее сканирование</div>
                 <div class="mt-2 text-sm text-gray-600">
                     CIDR: {{ $this->lastScanOptions['cidr'] ?? '-' }},
                     community: {{ $this->lastScanOptions['community'] ?? '-' }},
-                    timeout: {{ $this->lastScanOptions['timeout'] ?? '-' }} ms
+                    таймаут: {{ $this->lastScanOptions['timeout'] ?? '-' }} мс
                 </div>
             </div>
         @endif
 
         @if ($this->scanResults === [])
             <div class="rounded-xl border border-dashed border-gray-300 bg-white p-8 text-sm text-gray-500">
-                Run a scan from the header action to discover SNMP printers in your local network.
+                Запустите сканирование из верхнего действия, чтобы найти SNMP-принтеры в локальной сети.
             </div>
         @else
             <div class="rounded-xl border border-gray-200 bg-white shadow-sm">
                 <div class="flex items-center justify-between border-b border-gray-200 px-4 py-3">
                     <div>
-                        <div class="text-sm font-medium text-gray-900">Discovered printers</div>
-                        <div class="text-xs text-gray-500">Select the rows you want to import into the printer catalog.</div>
+                        <div class="text-sm font-medium text-gray-900">Обнаруженные принтеры</div>
+                        <div class="text-xs text-gray-500">Выберите строки, которые нужно импортировать в каталог принтеров.</div>
                     </div>
                     <x-filament::button wire:click="importSelected" color="primary">
-                        Import selected
+                        Импортировать выбранные
                     </x-filament::button>
                 </div>
 
@@ -31,13 +31,13 @@
                     <table class="min-w-full divide-y divide-gray-200 text-sm">
                         <thead class="bg-gray-50">
                             <tr>
-                                <th class="px-4 py-3 text-left font-medium text-gray-600">Select</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-600">Выбрать</th>
                                 <th class="px-4 py-3 text-left font-medium text-gray-600">IP</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-600">Name</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-600">Manufacturer</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-600">Model</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-600">Serial</th>
-                                <th class="px-4 py-3 text-left font-medium text-gray-600">Location</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-600">Имя</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-600">Производитель</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-600">Модель</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-600">Серийный номер</th>
+                                <th class="px-4 py-3 text-left font-medium text-gray-600">Расположение</th>
                             </tr>
                         </thead>
                         <tbody class="divide-y divide-gray-100 bg-white">

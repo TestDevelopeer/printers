@@ -23,11 +23,11 @@ class PrinterResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedRectangleStack;
 
-    protected static ?string $navigationLabel = 'Printers';
+    protected static ?string $navigationLabel = 'Принтеры';
 
-    protected static ?string $modelLabel = 'Printer';
+    protected static ?string $modelLabel = 'Принтер';
 
-    protected static ?string $pluralModelLabel = 'Printers';
+    protected static ?string $pluralModelLabel = 'Принтеры';
 
     public static function form(Schema $schema): Schema
     {

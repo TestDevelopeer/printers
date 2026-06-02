@@ -5,7 +5,7 @@
 
 <div class="space-y-2">
     <div class="flex items-center justify-between text-sm">
-        <span>{{ $percentage === null ? 'Unknown' : $percentage . '%' }}</span>
+        <span>{{ $percentage === null ? 'Неизвестно' : $percentage . '%' }}</span>
         <span class="text-gray-500">{{ $statusLabel }}</span>
     </div>
     <div class="h-2.5 rounded-full bg-gray-200">

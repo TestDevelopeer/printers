@@ -12,4 +12,8 @@ return [
     'scan_ping_concurrency' => (int) env('PRINTERS_SCAN_PING_CONCURRENCY', 32),
     'scan_estimated_snmp_hosts' => (int) env('PRINTERS_SCAN_ESTIMATED_SNMP_HOSTS', 16),
     'scan_estimated_snmp_seconds_per_host' => (float) env('PRINTERS_SCAN_ESTIMATED_SNMP_SECONDS_PER_HOST', 2),
+    'telegram' => [
+        'bot_token' => env('TELEGRAM_BOT_TOKEN'),
+        'chat_id' => env('TELEGRAM_CHAT_ID'),
+    ],
 ];

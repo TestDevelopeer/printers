@@ -16,7 +16,7 @@ class ListPrinters extends ListRecords
     {
         return [
             Action::make('networkScan')
-                ->label('Network Scan')
+                ->label('Сканирование сети')
                 ->icon('heroicon-m-magnifying-glass')
                 ->url(NetworkScan::getUrl()),
             CreateAction::make(),

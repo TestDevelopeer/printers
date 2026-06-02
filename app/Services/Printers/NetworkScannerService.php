@@ -46,7 +46,7 @@ class NetworkScannerService
         }
 
         throw new InvalidArgumentException(sprintf(
-            'CIDR range is too large for synchronous UI scanning. Estimated duration is about %d seconds for %d hosts at %d ms timeout. Reduce the range or use the CLI command printers:scan.',
+            'CIDR-диапазон слишком большой для синхронного сканирования в интерфейсе. Оценка: около %d секунд для %d хостов при таймауте %d мс. Уменьшите диапазон или используйте CLI-команду printers:scan.',
             $estimatedSeconds,
             $hostCount,
             $timeoutMs,
@@ -71,20 +71,20 @@ class NetworkScannerService
     private function hostsFromCidr(string $cidr): array
     {
         if (! preg_match('/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/', $cidr, $matches)) {
-            throw new InvalidArgumentException('CIDR must be in IPv4 format, for example 192.168.1.0/24.');
+            throw new InvalidArgumentException('CIDR должен быть в формате IPv4, например 192.168.1.0/24.');
         }
 
         $network = ip2long($matches[1]);
         $prefix = (int) $matches[2];
 
         if ($network === false || $prefix < 0 || $prefix > 32) {
-            throw new InvalidArgumentException('Invalid CIDR value.');
+            throw new InvalidArgumentException('Некорректное значение CIDR.');
         }
 
         $hostCount = 2 ** (32 - $prefix);
 
         if ($hostCount > config('printers.scan_max_hosts', 512)) {
-            throw new InvalidArgumentException('CIDR range is too large for synchronous scanning.');
+            throw new InvalidArgumentException('CIDR-диапазон слишком большой для синхронного сканирования.');
         }
 
         $start = $network & (-1 << (32 - $prefix));
@@ -170,14 +170,14 @@ class NetworkScannerService
             $tempFile = tempnam(sys_get_temp_dir(), 'printer-scan-');
 
             if ($tempFile === false) {
-                throw new RuntimeException('Failed to create a temporary file for scan results.');
+                throw new RuntimeException('Не удалось создать временный файл для результатов сканирования.');
             }
 
             $tempFiles[$index] = $tempFile;
             $pid = pcntl_fork();
 
             if ($pid === -1) {
-                throw new RuntimeException('Failed to fork scan worker process.');
+                throw new RuntimeException('Не удалось создать дочерний процесс сканирования.');
             }
 
             if ($pid === 0) {

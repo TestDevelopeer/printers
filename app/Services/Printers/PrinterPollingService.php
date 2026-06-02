@@ -17,11 +17,15 @@ class PrinterPollingService
 {
     public function __construct(
         private readonly PrinterSnmpService $printerSnmpService,
+        private readonly PrinterAlertService $printerAlertService,
     ) {
     }
 
     public function poll(Printer $printer): Printer
     {
+        $previousStatus = $printer->status;
+        $previousLowTonerStates = $this->snapshotLowTonerStates($printer);
+
         try {
             $discovered = $this->printerSnmpService->discover(
                 $printer->ip_address,
@@ -30,10 +34,15 @@ class PrinterPollingService
             );
 
             if ($discovered === null) {
-                return $this->markOffline($printer, 'SNMP responded, but the device did not identify as a printer.');
+                return $this->markOffline(
+                    $printer,
+                    'Устройство ответило по SNMP, но не определилось как принтер.',
+                    $previousStatus,
+                    $previousLowTonerStates,
+                );
             }
 
-            return $this->syncFromDiscovery($printer, $discovered);
+            return $this->syncFromDiscovery($printer, $discovered, $previousStatus, $previousLowTonerStates);
         } catch (Throwable $exception) {
             $status = $this->isOfflineError($exception) ? PrinterStatus::Offline : PrinterStatus::Error;
 
@@ -43,13 +52,24 @@ class PrinterPollingService
                 'last_error' => $exception->getMessage(),
             ])->save();
 
-            return $printer->refresh();
+            $printer = $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']);
+            $this->printerAlertService->dispatchAlerts($printer, $previousStatus, $previousLowTonerStates);
+
+            return $printer;
         }
     }
 
-    public function syncFromDiscovery(Printer $printer, DiscoveredPrinterData $discovered): Printer
+    public function syncFromDiscovery(
+        Printer $printer,
+        DiscoveredPrinterData $discovered,
+        ?PrinterStatus $previousStatus = null,
+        ?array $previousLowTonerStates = null,
+    ): Printer
     {
-        return DB::transaction(function () use ($printer, $discovered): Printer {
+        $previousStatus ??= $printer->status;
+        $previousLowTonerStates ??= $this->snapshotLowTonerStates($printer);
+
+        $printer = DB::transaction(function () use ($printer, $discovered): Printer {
             $now = Carbon::now();
 
             $printer->fill(array_merge(
@@ -68,6 +88,10 @@ class PrinterPollingService
 
             return $printer->fresh(['tonerSupplies', 'tonerHistory']);
         });
+
+        $this->printerAlertService->dispatchAlerts($printer, $previousStatus, $previousLowTonerStates);
+
+        return $printer;
     }
 
     public function upsertDiscoveredPrinter(DiscoveredPrinterData $discovered): Printer
@@ -92,7 +116,12 @@ class PrinterPollingService
         return $this->syncFromDiscovery($printer, $discovered);
     }
 
-    private function markOffline(Printer $printer, string $message): Printer
+    private function markOffline(
+        Printer $printer,
+        string $message,
+        ?PrinterStatus $previousStatus = null,
+        ?array $previousLowTonerStates = null,
+    ): Printer
     {
         $printer->forceFill([
             'status' => PrinterStatus::Offline,
@@ -100,7 +129,14 @@ class PrinterPollingService
             'last_error' => $message,
         ])->save();
 
-        return $printer->refresh();
+        $printer = $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']);
+        $this->printerAlertService->dispatchAlerts(
+            $printer,
+            $previousStatus ?? $printer->status,
+            $previousLowTonerStates ?? $this->snapshotLowTonerStates($printer),
+        );
+
+        return $printer;
     }
 
     private function isOfflineError(Throwable $exception): bool
@@ -273,14 +309,7 @@ class PrinterPollingService
 
     private function makeSupplySignature(string $color, ?string $description): string
     {
-        $normalizedDescription = Str::lower($description ?? '');
-        $normalizedDescription = preg_replace('/\s+/', ' ', trim($normalizedDescription)) ?? '';
-
-        if ($normalizedDescription === '') {
-            return $color;
-        }
-
-        return "{$color}:{$normalizedDescription}";
+        return TonerSupply::buildSupplySignature($color, $description);
     }
 
     private function cleanString(mixed $value): ?string
@@ -292,5 +321,20 @@ class PrinterPollingService
         $value = trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * @return array<string, bool>
+     */
+    private function snapshotLowTonerStates(Printer $printer): array
+    {
+        if (! $printer->exists) {
+            return [];
+        }
+
+        return $printer->allTonerSupplies()
+            ->get()
+            ->mapWithKeys(fn (TonerSupply $supply): array => [$supply->identity_key => $supply->isLow()])
+            ->all();
     }
 }

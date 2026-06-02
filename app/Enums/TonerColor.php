@@ -15,13 +15,13 @@ enum TonerColor: string
     public function label(): string
     {
         return match ($this) {
-            self::Black => 'Black',
-            self::Cyan => 'Cyan',
-            self::Magenta => 'Magenta',
-            self::Yellow => 'Yellow',
-            self::Waste => 'Waste',
-            self::Other => 'Other',
-            self::Unknown => 'Unknown',
+            self::Black => 'Черный',
+            self::Cyan => 'Голубой',
+            self::Magenta => 'Пурпурный',
+            self::Yellow => 'Желтый',
+            self::Waste => 'Отработка',
+            self::Other => 'Другой',
+            self::Unknown => 'Неизвестно',
         };
     }
 }

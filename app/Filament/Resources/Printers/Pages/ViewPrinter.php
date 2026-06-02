@@ -17,14 +17,14 @@ class ViewPrinter extends ViewRecord
     {
         return [
             Action::make('poll')
-                ->label('Poll now')
+                ->label('Опросить сейчас')
                 ->icon('heroicon-m-arrow-path')
                 ->action(function (): void {
                     PollPrinterJob::dispatch($this->record->id);
 
                     Notification::make()
-                        ->title('Polling queued')
-                        ->body("Printer {$this->record->display_name} will be polled shortly.")
+                        ->title('Опрос поставлен в очередь')
+                        ->body("Принтер {$this->record->display_name} будет опрошен в ближайшее время.")
                         ->success()
                         ->send();
                 }),

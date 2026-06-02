@@ -80,21 +80,21 @@ class Printer extends Model
         $supplies = $this->tonerSupplies;
 
         if ($supplies->isEmpty()) {
-            return 'No toner data';
+            return 'Нет данных';
         }
 
         $known = $supplies->filter(fn (TonerSupply $supply) => $supply->percentage !== null);
         $lowCount = $supplies->filter(fn (TonerSupply $supply) => $supply->isLow())->count();
 
         if ($known->isEmpty()) {
-            return 'Unknown';
+            return 'Неизвестно';
         }
 
         $average = (int) round($known->avg('percentage'));
 
         return $lowCount > 0
-            ? sprintf('%d%% avg, %d low', $average, $lowCount)
-            : sprintf('%d%% avg', $average);
+            ? sprintf('Средний уровень %d%%, низкий: %d', $average, $lowCount)
+            : sprintf('Средний уровень %d%%', $average);
     }
 
     public function getHasLowTonerAttribute(): bool

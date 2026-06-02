@@ -25,7 +25,7 @@ class PrintersTable
         return $table
             ->columns([
                 TextColumn::make('display_name')
-                    ->label('Name')
+                    ->label('Имя')
                     ->searchable(['name', 'discovered_name', 'hostname', 'ip_address'])
                     ->sortable(),
                 TextColumn::make('ip_address')
@@ -33,41 +33,46 @@ class PrintersTable
                     ->searchable()
                     ->sortable(),
                 TextColumn::make('model')
-                    ->placeholder('Unknown')
+                    ->label('Модель')
+                    ->placeholder('Неизвестно')
                     ->sortable(),
                 TextColumn::make('status')
+                    ->label('Статус')
                     ->badge()
-                    ->formatStateUsing(fn ($state) => $state?->label() ?? 'Unknown')
+                    ->formatStateUsing(fn ($state) => $state?->label() ?? 'Неизвестно')
                     ->color(fn ($state) => $state?->color() ?? 'warning')
                     ->sortable(),
                 TextColumn::make('toner_summary')
-                    ->label('Toner')
+                    ->label('Тонеры')
                     ->state(fn (Printer $record): string => $record->toner_summary),
                 IconColumn::make('has_low_toner')
-                    ->label('Low')
+                    ->label('Низкий')
                     ->boolean()
                     ->state(fn (Printer $record): bool => $record->has_low_toner),
                 TextColumn::make('last_seen_at')
+                    ->label('Последний ответ')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(),
                 TextColumn::make('last_polled_at')
+                    ->label('Последний опрос')
                     ->dateTime()
                     ->sortable()
                     ->toggleable(),
             ])
             ->filters([
                 SelectFilter::make('status')
+                    ->label('Статус')
                     ->options([
-                        'online' => 'Online',
-                        'offline' => 'Offline',
-                        'error' => 'Error',
-                        'unknown' => 'Unknown',
+                        'online' => 'В сети',
+                        'offline' => 'Не в сети',
+                        'error' => 'Ошибка',
+                        'unknown' => 'Неизвестно',
                     ]),
                 TernaryFilter::make('is_active')
-                    ->label('Active'),
+                    ->label('Активен'),
                 TernaryFilter::make('low_toner')
-                    ->label('Low toner')
+                    ->label('Низкий тонер')
                     ->queries(
                         true: fn ($query) => $query->whereHas('tonerSupplies', fn ($tonerQuery) => $tonerQuery->whereNotNull('percentage')->where('percentage', '<=', config('printers.low_toner_threshold', 15))),
                         false: fn ($query) => $query->whereDoesntHave('tonerSupplies', fn ($tonerQuery) => $tonerQuery->whereNotNull('percentage')->where('percentage', '<=', config('printers.low_toner_threshold', 15))),
@@ -77,10 +82,11 @@ class PrintersTable
             ->recordActions([
                 ViewAction::make(),
                 Action::make('rename')
+                    ->label('Переименовать')
                     ->icon('heroicon-m-pencil-square')
                     ->schema([
                         TextInput::make('name')
-                            ->label('Display name')
+                            ->label('Отображаемое имя')
                             ->required(),
                     ])
                     ->fillForm(fn (Printer $record): array => [
@@ -90,14 +96,15 @@ class PrintersTable
                         $record->update(['name' => $data['name']]);
                     }),
                 Action::make('poll')
+                    ->label('Опросить')
                     ->icon('heroicon-m-arrow-path')
                     ->requiresConfirmation()
                     ->action(function (Printer $record): void {
                         PollPrinterJob::dispatch($record->id);
 
                         Notification::make()
-                            ->title('Polling queued')
-                            ->body("Printer {$record->display_name} will be polled in the background.")
+                            ->title('Опрос поставлен в очередь')
+                            ->body("Принтер {$record->display_name} будет опрошен в фоне.")
                             ->success()
                             ->send();
                     }),

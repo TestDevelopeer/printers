@@ -13,7 +13,7 @@ class NetworkScannerServiceTest extends TestCase
     public function test_it_rejects_slow_synchronous_scan_ranges(): void
     {
         config()->set('printers.scan_timeout', 1000);
-        config()->set('printers.scan_max_sync_seconds', 15);
+        config()->set('printers.scan_max_sync_seconds', 9);
         config()->set('printers.scan_concurrency', 16);
         config()->set('printers.scan_ping_concurrency', 32);
         config()->set('printers.scan_estimated_snmp_hosts', 16);
@@ -25,7 +25,7 @@ class NetworkScannerServiceTest extends TestCase
         );
 
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('CIDR range is too large for synchronous UI scanning.');
+        $this->expectExceptionMessage('CIDR-диапазон слишком большой для синхронного сканирования в интерфейсе.');
 
         $service->assertCanRunSynchronously('192.168.1.0/24', 1000);
     }

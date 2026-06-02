@@ -27,6 +27,8 @@ class TonerSupply extends Model
         'installed_at',
         'removed_at',
         'last_seen_at',
+        'comment',
+        'is_on_service',
     ];
 
     protected function casts(): array
@@ -38,6 +40,7 @@ class TonerSupply extends Model
             'installed_at' => 'datetime',
             'removed_at' => 'datetime',
             'last_seen_at' => 'datetime',
+            'is_on_service' => 'boolean',
         ];
     }
 
@@ -55,10 +58,10 @@ class TonerSupply extends Model
     public function getStatusLabelAttribute(): string
     {
         if (! $this->is_known || $this->percentage === null) {
-            return 'Unknown';
+            return 'Неизвестно';
         }
 
-        return $this->isLow() ? 'Low' : 'OK';
+        return $this->isLow() ? 'Низкий' : 'Норма';
     }
 
     public function getColorLabelAttribute(): string
@@ -68,11 +71,40 @@ class TonerSupply extends Model
 
     public function getPercentageDisplayAttribute(): string
     {
-        return $this->percentage === null ? 'Unknown' : "{$this->percentage}%";
+        return $this->percentage === null ? 'Неизвестно' : "{$this->percentage}%";
     }
 
     public function getIsInstalledAttribute(): bool
     {
         return $this->removed_at === null;
+    }
+
+    public function getCommentDisplayAttribute(): string
+    {
+        return filled($this->comment) ? $this->comment : 'Без комментария';
+    }
+
+    public function getServiceStatusLabelAttribute(): string
+    {
+        return $this->is_on_service ? 'На обслуживании' : 'В работе';
+    }
+
+    public function getIdentityKeyAttribute(): string
+    {
+        return self::buildSupplySignature(
+            $this->color?->value ?? 'unknown',
+            $this->snmp_description,
+        );
+    }
+
+    public static function buildSupplySignature(?string $color, ?string $description): string
+    {
+        $color = $color ?: 'unknown';
+        $description = mb_strtolower(trim((string) $description));
+        $description = preg_replace('/\s+/u', ' ', $description) ?? '';
+
+        return $description === ''
+            ? $color
+            : "{$color}:{$description}";
     }
 }

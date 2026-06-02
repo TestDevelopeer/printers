@@ -12,10 +12,10 @@ enum PrinterStatus: string
     public function label(): string
     {
         return match ($this) {
-            self::Online => 'Online',
-            self::Offline => 'Offline',
-            self::Error => 'Error',
-            self::Unknown => 'Unknown',
+            self::Online => 'В сети',
+            self::Offline => 'Не в сети',
+            self::Error => 'Ошибка',
+            self::Unknown => 'Неизвестно',
         };
     }
 
