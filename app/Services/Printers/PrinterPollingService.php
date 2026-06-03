@@ -58,6 +58,7 @@ class PrinterPollingService
                 'status' => $status,
                 'last_polled_at' => now(),
                 'is_polling' => false,
+                'manual_poll_requested_at' => null,
                 'last_error' => $exception->getMessage(),
             ])->save();
 
@@ -100,6 +101,7 @@ class PrinterPollingService
                     'last_seen_at' => $now,
                     'last_polled_at' => $now,
                     'is_polling' => false,
+                    'manual_poll_requested_at' => null,
                     'last_error' => null,
                 ],
             ));
@@ -214,6 +216,7 @@ class PrinterPollingService
             'status' => PrinterStatus::Offline,
             'last_polled_at' => now(),
             'is_polling' => false,
+            'manual_poll_requested_at' => null,
             'last_error' => $message,
         ])->save();
 

@@ -21,7 +21,7 @@ class PollPrintersCommand extends Command
             ->select('id')
             ->chunkById(100, function ($printers) use (&$count): void {
                 foreach ($printers as $printer) {
-                    PollPrinterJob::dispatch($printer->id);
+                    PollPrinterJob::dispatch($printer->id, 'scheduled');
                     $count++;
                 }
             });

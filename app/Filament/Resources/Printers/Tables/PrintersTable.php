@@ -110,7 +110,7 @@ class PrintersTable
                             'manual_poll_requested_at' => now(),
                         ])->save();
 
-                        PollPrinterJob::dispatch($record->id);
+                        PollPrinterJob::dispatch($record->id, 'manual');
 
                         Notification::make()
                             ->title('Опрос поставлен в очередь')

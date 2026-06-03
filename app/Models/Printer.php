@@ -3,10 +3,10 @@
 namespace App\Models;
 
 use App\Enums\PrinterStatus;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Printer extends Model
 {
@@ -82,6 +82,11 @@ class Printer extends Model
     public function cartridgeSets(): HasMany
     {
         return $this->hasMany(CartridgeSet::class);
+    }
+
+    public function pollLogs(): HasMany
+    {
+        return $this->hasMany(PrinterPollLog::class)->latest('started_at');
     }
 
     public function getDisplayNameAttribute(): string

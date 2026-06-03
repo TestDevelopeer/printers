@@ -27,7 +27,7 @@ class ViewPrinter extends ViewRecord
                         'manual_poll_requested_at' => now(),
                     ])->save();
 
-                    PollPrinterJob::dispatch($this->record->id);
+                    PollPrinterJob::dispatch($this->record->id, 'manual');
 
                     $this->record->refresh();
 

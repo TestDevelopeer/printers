@@ -1,0 +1,35 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_REMOTE_DIR: ${{ secrets.DEPLOY_REMOTE_DIR }}
+      DEPLOY_SSH_KEY_PATH: /home/runner/.ssh/printers_deploy_ed25519
+      DEPLOY_KNOWN_HOSTS_PATH: /home/runner/.ssh/known_hosts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p /home/runner/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_PRIVATE_KEY }}" > "$DEPLOY_SSH_KEY_PATH"
+          chmod 600 "$DEPLOY_SSH_KEY_PATH"
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > "$DEPLOY_KNOWN_HOSTS_PATH"
+          chmod 600 "$DEPLOY_KNOWN_HOSTS_PATH"
+
+      - name: Deploy
+        run: node scripts/deploy.mjs
