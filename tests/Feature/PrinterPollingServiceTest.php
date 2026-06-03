@@ -158,7 +158,7 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertCount(1, TonerSupply::query()->where('supply_signature', $updatedSupply->supply_signature)->get());
     }
 
-    public function test_it_marks_foreign_supply_for_confirmation_and_can_confirm_transfer(): void
+    public function test_it_creates_separate_active_supplies_for_identical_printers(): void
     {
         $printerA = $this->makePrinter('192.168.1.30', 'Printer A');
         $printerB = $this->makePrinter('192.168.1.31', 'Printer B');
@@ -182,9 +182,6 @@ class PrinterPollingServiceTest extends TestCase
             ]],
         ));
 
-        $originalSupply = $printerA->fresh()->tonerSupplies()->first();
-        $this->assertNotNull($originalSupply);
-
         $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
             ipAddress: '192.168.1.31',
             tonerSupplies: [[
@@ -203,29 +200,25 @@ class PrinterPollingServiceTest extends TestCase
             ]],
         ));
 
-        $pendingSupply = $originalSupply->fresh(['printer', 'transferTargetPrinter']);
+        $printerA->refresh();
         $printerB->refresh();
 
-        $this->assertTrue($pendingSupply->needsTransferConfirmation());
-        $this->assertSame($printerA->id, $pendingSupply->printer_id);
-        $this->assertSame($printerB->id, $pendingSupply->transfer_target_printer_id);
-        $this->assertStringContainsString('Printer A', $pendingSupply->transfer_warning ?? '');
+        $supplyA = $printerA->tonerSupplies()->first();
+        $supplyB = $printerB->tonerSupplies()->first();
+
+        $this->assertNotNull($supplyA);
+        $this->assertNotNull($supplyB);
+        $this->assertNotSame($supplyA->id, $supplyB->id);
+        $this->assertSame($supplyA->supply_signature, $supplyB->supply_signature);
+        $this->assertFalse($supplyA->needsTransferConfirmation());
+        $this->assertFalse($supplyB->needsTransferConfirmation());
+        $this->assertCount(1, $printerA->displayed_toner_supplies);
         $this->assertCount(1, $printerB->displayed_toner_supplies);
-        $this->assertSame($pendingSupply->id, $printerB->displayed_toner_supplies->first()->id);
-        $this->assertCount(0, $printerB->tonerSupplies()->get());
-        $this->assertCount(0, $printerB->tonerHistory()->get());
-
-        $confirmedSupply = $service->confirmPendingTransfer($pendingSupply);
-
-        $this->assertSame($printerB->id, $confirmedSupply->printer_id);
-        $this->assertNull($confirmedSupply->transfer_target_printer_id);
-        $this->assertNull($confirmedSupply->removed_at);
-        $this->assertFalse($confirmedSupply->needsTransferConfirmation());
-        $this->assertCount(0, $printerA->fresh()->tonerSupplies()->get());
-        $this->assertCount(1, $printerB->fresh()->tonerSupplies()->get());
+        $this->assertCount(0, $printerA->incomingPendingTonerSupplies()->get());
+        $this->assertCount(0, $printerB->incomingPendingTonerSupplies()->get());
     }
 
-    public function test_it_clears_pending_transfer_when_supply_disappears_from_target_printer(): void
+    public function test_it_marks_historical_supply_for_confirmation_and_can_confirm_transfer(): void
     {
         $printerA = $this->makePrinter('192.168.1.40', 'Printer A');
         $printerB = $this->makePrinter('192.168.1.41', 'Printer B');
@@ -252,8 +245,82 @@ class PrinterPollingServiceTest extends TestCase
         $supply = $printerA->fresh()->tonerSupplies()->first();
         $this->assertNotNull($supply);
 
+        $service->syncFromDiscovery($printerA->fresh(), new DiscoveredPrinterData(
+            ipAddress: '192.168.1.40',
+            tonerSupplies: [],
+        ));
+
+        $this->assertCount(1, $printerA->fresh()->tonerHistory()->get());
+
         $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
             ipAddress: '192.168.1.41',
+            tonerSupplies: [[
+                'slot_key' => '2',
+                'color' => 'cyan',
+                'snmp_description' => 'TK-5240C',
+                'level' => 64,
+                'max_capacity' => 100,
+                'percentage' => 64,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '2',
+                    'description' => 'TK-5240C',
+                ],
+            ]],
+        ));
+
+        $pendingSupply = $supply->fresh(['printer', 'transferTargetPrinter']);
+
+        $this->assertTrue($pendingSupply->needsTransferConfirmation());
+        $this->assertSame($printerA->id, $pendingSupply->printer_id);
+        $this->assertSame($printerB->id, $pendingSupply->transfer_target_printer_id);
+        $this->assertCount(1, $printerB->fresh()->displayed_toner_supplies);
+
+        $confirmedSupply = $service->confirmPendingTransfer($pendingSupply);
+
+        $this->assertSame($printerB->id, $confirmedSupply->printer_id);
+        $this->assertNull($confirmedSupply->transfer_target_printer_id);
+        $this->assertNull($confirmedSupply->removed_at);
+        $this->assertFalse($confirmedSupply->needsTransferConfirmation());
+        $this->assertCount(0, $printerA->fresh()->tonerSupplies()->get());
+        $this->assertCount(1, $printerB->fresh()->tonerSupplies()->get());
+    }
+
+    public function test_it_clears_pending_transfer_when_supply_disappears_from_target_printer(): void
+    {
+        $printerA = $this->makePrinter('192.168.1.50', 'Printer A');
+        $printerB = $this->makePrinter('192.168.1.51', 'Printer B');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.50',
+            tonerSupplies: [[
+                'slot_key' => '1',
+                'color' => 'cyan',
+                'snmp_description' => 'TK-5240C',
+                'level' => 66,
+                'max_capacity' => 100,
+                'percentage' => 66,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '1',
+                    'description' => 'TK-5240C',
+                ],
+            ]],
+        ));
+
+        $supply = $printerA->fresh()->tonerSupplies()->first();
+        $this->assertNotNull($supply);
+
+        $service->syncFromDiscovery($printerA->fresh(), new DiscoveredPrinterData(
+            ipAddress: '192.168.1.50',
+            tonerSupplies: [],
+        ));
+
+        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.51',
             tonerSupplies: [[
                 'slot_key' => '2',
                 'color' => 'cyan',
@@ -273,7 +340,7 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertSame($printerB->id, $supply->fresh()->transfer_target_printer_id);
 
         $service->syncFromDiscovery($printerB->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.41',
+            ipAddress: '192.168.1.51',
             tonerSupplies: [],
         ));
 

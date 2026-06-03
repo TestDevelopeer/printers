@@ -270,7 +270,7 @@ class PrinterPollingService
                 continue;
             }
 
-            $foreignSupply = $this->findForeignMatchingSupply($signature, $printer->getKey());
+            $foreignSupply = $this->findForeignTransferCandidate($signature, $printer->getKey());
 
             if ($foreignSupply instanceof TonerSupply) {
                 $isNewPending = $this->markPendingTransfer($foreignSupply, $printer, $normalized, $now);
@@ -430,16 +430,44 @@ class PrinterPollingService
             ->first();
     }
 
-    private function findForeignMatchingSupply(string $signature, int $printerId): ?TonerSupply
+    private function findForeignTransferCandidate(string $signature, int $printerId): ?TonerSupply
     {
-        return TonerSupply::query()
+        $candidates = TonerSupply::query()
             ->with(['printer', 'transferTargetPrinter'])
             ->where('supply_signature', $signature)
             ->where('printer_id', '!=', $printerId)
             ->get()
-            ->sortByDesc(fn (TonerSupply $supply): int => $supply->removed_at === null ? 1 : 0)
+            ->values();
+
+        $pendingForTarget = $candidates->first(
+            fn (TonerSupply $supply): bool => $supply->isPendingForPrinter($printerId),
+        );
+
+        if ($pendingForTarget instanceof TonerSupply) {
+            return $pendingForTarget;
+        }
+
+        $hasActiveCandidate = $candidates->contains(
+            fn (TonerSupply $supply): bool => $supply->removed_at === null,
+        );
+
+        if ($hasActiveCandidate) {
+            return null;
+        }
+
+        $historicalCandidates = $candidates
+            ->filter(
+                fn (TonerSupply $supply): bool => $supply->removed_at !== null
+                    && $supply->transfer_target_printer_id === null,
+            )
             ->sortByDesc(fn (TonerSupply $supply): int => $supply->last_seen_at?->getTimestamp() ?? 0)
-            ->first();
+            ->values();
+
+        if ($historicalCandidates->count() !== 1) {
+            return null;
+        }
+
+        return $historicalCandidates->first();
     }
 
     /**
