@@ -20,8 +20,16 @@ class PollPrinterJob implements ShouldQueue
     {
         $printer = Printer::query()->find($this->printerId);
 
-        if ($printer !== null) {
+        if ($printer === null) {
+            return;
+        }
+
+        try {
             $printerPollingService->poll($printer);
+        } finally {
+            $printer->forceFill([
+                'is_polling' => false,
+            ])->saveQuietly();
         }
     }
 }

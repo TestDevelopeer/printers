@@ -24,4 +24,17 @@ enum TonerColor: string
             self::Unknown => 'Неизвестно',
         };
     }
+
+    public function badgeColor(): string
+    {
+        return match ($this) {
+            self::Black => 'gray',
+            self::Cyan => 'info',
+            self::Magenta => 'danger',
+            self::Yellow => 'warning',
+            self::Waste => 'gray',
+            self::Other => 'gray',
+            self::Unknown => 'gray',
+        };
+    }
 }

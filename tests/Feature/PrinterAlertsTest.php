@@ -145,4 +145,73 @@ class PrinterAlertsTest extends TestCase
         Http::assertSentCount(1);
         Http::assertSent(fn ($request) => str_contains($request['text'], 'сменил статус'));
     }
+
+    public function test_it_notifies_when_active_cartridge_is_replaced(): void
+    {
+        config([
+            'printers.telegram.bot_token' => 'token',
+            'printers.telegram.chat_id' => 'chat',
+        ]);
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $printer = Printer::query()->create([
+            'name' => 'Kyocera',
+            'ip_address' => '192.168.1.25',
+            'snmp_community' => 'public',
+            'snmp_version' => '2c',
+            'status' => PrinterStatus::Unknown,
+            'is_active' => true,
+        ]);
+
+        $service = new PrinterPollingService(
+            new PrinterSnmpService(),
+            new PrinterAlertService(new TelegramBotService()),
+        );
+
+        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.25',
+            tonerSupplies: [[
+                'slot_key' => '1',
+                'color' => 'yellow',
+                'snmp_description' => 'TK-5240Y',
+                'level' => 70,
+                'max_capacity' => 100,
+                'percentage' => 70,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '1',
+                    'description' => 'TK-5240Y',
+                ],
+            ]],
+        ));
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $service->syncFromDiscovery($printer->fresh(), new DiscoveredPrinterData(
+            ipAddress: '192.168.1.25',
+            tonerSupplies: [[
+                'slot_key' => '1',
+                'color' => 'cyan',
+                'snmp_description' => 'TK-5240C',
+                'level' => 85,
+                'max_capacity' => 100,
+                'percentage' => 85,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '1',
+                    'description' => 'TK-5240C',
+                ],
+            ]],
+        ));
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'заменен картридж'));
+    }
 }

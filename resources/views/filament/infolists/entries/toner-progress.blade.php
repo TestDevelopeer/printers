@@ -1,12 +1,10 @@
 @php
     $percentage = $getRecord()->percentage;
-    $statusLabel = $getRecord()->status_label;
 @endphp
 
 <div class="space-y-2">
-    <div class="flex items-center justify-between text-sm">
-        <span>{{ $percentage === null ? 'Неизвестно' : $percentage . '%' }}</span>
-        <span class="text-gray-500">{{ $statusLabel }}</span>
+    <div class="text-sm font-medium">
+        {{ $percentage === null ? 'Неизвестно' : $percentage . '% тонера' }}
     </div>
     <div class="h-2.5 rounded-full bg-gray-200">
         <div

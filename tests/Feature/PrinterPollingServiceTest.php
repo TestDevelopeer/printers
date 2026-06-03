@@ -62,6 +62,8 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertCount(0, $printer->tonerHistory()->get());
 
         $activeSupply->update([
+            'color' => 'magenta',
+            'is_color_manual' => true,
             'comment' => 'Проверен и промаркирован.',
             'is_on_service' => true,
         ]);
@@ -81,6 +83,7 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertNotNull($historySupply->removed_at);
         $this->assertSame('Проверен и промаркирован.', $historySupply->comment);
         $this->assertTrue($historySupply->is_on_service);
+        $this->assertSame('magenta', $historySupply->color?->value);
 
         $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
             ipAddress: '192.168.1.25',
@@ -110,6 +113,8 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertNull($reactivatedSupply->removed_at);
         $this->assertCount(0, $printer->tonerHistory()->get());
         $this->assertSame('Проверен и промаркирован.', $reactivatedSupply->comment);
-        $this->assertTrue($reactivatedSupply->is_on_service);
+        $this->assertFalse($reactivatedSupply->is_on_service);
+        $this->assertSame('magenta', $reactivatedSupply->color?->value);
+        $this->assertSame('cyan', $reactivatedSupply->detected_color?->value);
     }
 }

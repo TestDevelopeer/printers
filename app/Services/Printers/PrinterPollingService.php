@@ -10,7 +10,6 @@ use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Throwable;
 
 class PrinterPollingService
@@ -25,6 +24,7 @@ class PrinterPollingService
     {
         $previousStatus = $printer->status;
         $previousLowTonerStates = $this->snapshotLowTonerStates($printer);
+        $previousActiveSupplies = $this->snapshotActiveSupplies($printer);
 
         try {
             $discovered = $this->printerSnmpService->discover(
@@ -39,35 +39,53 @@ class PrinterPollingService
                     'Устройство ответило по SNMP, но не определилось как принтер.',
                     $previousStatus,
                     $previousLowTonerStates,
+                    $previousActiveSupplies,
                 );
             }
 
-            return $this->syncFromDiscovery($printer, $discovered, $previousStatus, $previousLowTonerStates);
+            return $this->syncFromDiscovery(
+                $printer,
+                $discovered,
+                $previousStatus,
+                $previousLowTonerStates,
+                $previousActiveSupplies,
+            );
         } catch (Throwable $exception) {
             $status = $this->isOfflineError($exception) ? PrinterStatus::Offline : PrinterStatus::Error;
 
             $printer->forceFill([
                 'status' => $status,
                 'last_polled_at' => now(),
+                'is_polling' => false,
                 'last_error' => $exception->getMessage(),
             ])->save();
 
             $printer = $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']);
-            $this->printerAlertService->dispatchAlerts($printer, $previousStatus, $previousLowTonerStates);
+            $this->printerAlertService->dispatchAlerts(
+                $printer,
+                $previousStatus,
+                $previousLowTonerStates,
+                $previousActiveSupplies,
+            );
 
             return $printer;
         }
     }
 
+    /**
+     * @param  array<string, bool>|null  $previousLowTonerStates
+     * @param  array<string, array{color: string, description: string|null}>|null  $previousActiveSupplies
+     */
     public function syncFromDiscovery(
         Printer $printer,
         DiscoveredPrinterData $discovered,
         ?PrinterStatus $previousStatus = null,
         ?array $previousLowTonerStates = null,
-    ): Printer
-    {
+        ?array $previousActiveSupplies = null,
+    ): Printer {
         $previousStatus ??= $printer->status;
         $previousLowTonerStates ??= $this->snapshotLowTonerStates($printer);
+        $previousActiveSupplies ??= $this->snapshotActiveSupplies($printer);
 
         $printer = DB::transaction(function () use ($printer, $discovered): Printer {
             $now = Carbon::now();
@@ -79,6 +97,7 @@ class PrinterPollingService
                     'status' => PrinterStatus::Online,
                     'last_seen_at' => $now,
                     'last_polled_at' => $now,
+                    'is_polling' => false,
                     'last_error' => null,
                 ],
             ));
@@ -86,10 +105,15 @@ class PrinterPollingService
 
             $this->syncTonerSupplies($printer, $discovered->tonerSupplies, $now);
 
-            return $printer->fresh(['tonerSupplies', 'tonerHistory']);
+            return $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']);
         });
 
-        $this->printerAlertService->dispatchAlerts($printer, $previousStatus, $previousLowTonerStates);
+        $this->printerAlertService->dispatchAlerts(
+            $printer,
+            $previousStatus,
+            $previousLowTonerStates,
+            $previousActiveSupplies,
+        );
 
         return $printer;
     }
@@ -116,16 +140,21 @@ class PrinterPollingService
         return $this->syncFromDiscovery($printer, $discovered);
     }
 
+    /**
+     * @param  array<string, bool>|null  $previousLowTonerStates
+     * @param  array<string, array{color: string, description: string|null}>|null  $previousActiveSupplies
+     */
     private function markOffline(
         Printer $printer,
         string $message,
         ?PrinterStatus $previousStatus = null,
         ?array $previousLowTonerStates = null,
-    ): Printer
-    {
+        ?array $previousActiveSupplies = null,
+    ): Printer {
         $printer->forceFill([
             'status' => PrinterStatus::Offline,
             'last_polled_at' => now(),
+            'is_polling' => false,
             'last_error' => $message,
         ])->save();
 
@@ -134,6 +163,7 @@ class PrinterPollingService
             $printer,
             $previousStatus ?? $printer->status,
             $previousLowTonerStates ?? $this->snapshotLowTonerStates($printer),
+            $previousActiveSupplies ?? $this->snapshotActiveSupplies($printer),
         );
 
         return $printer;
@@ -171,7 +201,9 @@ class PrinterPollingService
                 $normalized['color'],
                 $normalized['snmp_description'],
             );
-            $installedAt = $supply?->removed_at !== null || $supply?->installed_at === null
+
+            $wasInHistory = $supply?->removed_at !== null;
+            $installedAt = $wasInHistory || $supply?->installed_at === null
                 ? $now
                 : $supply->installed_at;
 
@@ -179,11 +211,23 @@ class PrinterPollingService
                 'printer_id' => $printer->getKey(),
             ]);
 
-            $supply->fill(array_merge($normalized, [
+            $payload = array_merge($normalized, [
                 'installed_at' => $installedAt,
                 'removed_at' => null,
                 'last_seen_at' => $now,
-            ]));
+            ]);
+
+            if ($supply->is_color_manual) {
+                unset($payload['color']);
+            } else {
+                $payload['color'] = $normalized['detected_color'];
+            }
+
+            if ($wasInHistory) {
+                $payload['is_on_service'] = false;
+            }
+
+            $supply->fill($payload);
             $supply->printer()->associate($printer);
             $supply->save();
 
@@ -194,13 +238,18 @@ class PrinterPollingService
             $seenIds[] = $supply->getKey();
         }
 
-        $printer->allTonerSupplies()
+        $toHistory = $printer->allTonerSupplies()
             ->whereNull('removed_at')
             ->when($seenIds !== [], fn ($query) => $query->whereNotIn('id', $seenIds))
-            ->update([
+            ->get();
+
+        foreach ($toHistory as $supply) {
+            $supply->forceFill([
                 'removed_at' => $now,
+                'is_on_service' => true,
                 'updated_at' => $now,
-            ]);
+            ])->save();
+        }
     }
 
     /**
@@ -222,6 +271,7 @@ class PrinterPollingService
             'slot_key' => $slotKey,
             'supply_signature' => $this->makeSupplySignature($color, $description),
             'color' => $color,
+            'detected_color' => $color,
             'snmp_description' => $description,
             'level' => Arr::get($supplyData, 'level'),
             'max_capacity' => Arr::get($supplyData, 'max_capacity'),
@@ -303,6 +353,7 @@ class PrinterPollingService
 
         $conflictingSupply->forceFill([
             'removed_at' => $now,
+            'is_on_service' => true,
             'updated_at' => $now,
         ])->save();
     }
@@ -335,6 +386,27 @@ class PrinterPollingService
         return $printer->allTonerSupplies()
             ->get()
             ->mapWithKeys(fn (TonerSupply $supply): array => [$supply->identity_key => $supply->isLow()])
+            ->all();
+    }
+
+    /**
+     * @return array<string, array{color: string, description: string|null}>
+     */
+    private function snapshotActiveSupplies(Printer $printer): array
+    {
+        if (! $printer->exists) {
+            return [];
+        }
+
+        return $printer->tonerSupplies()
+            ->get()
+            ->filter(fn (TonerSupply $supply): bool => filled($supply->slot_key))
+            ->mapWithKeys(fn (TonerSupply $supply): array => [
+                $supply->slot_key => [
+                    'color' => $supply->color_label,
+                    'description' => $supply->snmp_description,
+                ],
+            ])
             ->all();
     }
 }

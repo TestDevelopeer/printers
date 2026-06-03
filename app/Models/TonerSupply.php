@@ -17,6 +17,8 @@ class TonerSupply extends Model
         'slot_key',
         'supply_signature',
         'color',
+        'detected_color',
+        'is_color_manual',
         'snmp_description',
         'level',
         'max_capacity',
@@ -35,12 +37,14 @@ class TonerSupply extends Model
     {
         return [
             'color' => TonerColor::class,
+            'detected_color' => TonerColor::class,
             'is_known' => 'boolean',
             'raw_value' => 'array',
             'installed_at' => 'datetime',
             'removed_at' => 'datetime',
             'last_seen_at' => 'datetime',
             'is_on_service' => 'boolean',
+            'is_color_manual' => 'boolean',
         ];
     }
 
@@ -67,6 +71,11 @@ class TonerSupply extends Model
     public function getColorLabelAttribute(): string
     {
         return ($this->color ?? TonerColor::Unknown)->label();
+    }
+
+    public function getColorBadgeColorAttribute(): string
+    {
+        return ($this->color ?? TonerColor::Unknown)->badgeColor();
     }
 
     public function getPercentageDisplayAttribute(): string

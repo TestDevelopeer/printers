@@ -49,6 +49,9 @@ class PrintersTable
                     ->label('Низкий')
                     ->boolean()
                     ->state(fn (Printer $record): bool => $record->has_low_toner),
+                IconColumn::make('is_polling')
+                    ->label('Фон')
+                    ->boolean(),
                 TextColumn::make('last_seen_at')
                     ->label('Последний ответ')
                     ->dateTime()
@@ -96,15 +99,22 @@ class PrintersTable
                         $record->update(['name' => $data['name']]);
                     }),
                 Action::make('poll')
-                    ->label('Опросить')
+                    ->label(fn (Printer $record): string => $record->is_polling ? 'Опрос выполняется' : 'Опросить')
                     ->icon('heroicon-m-arrow-path')
+                    ->color(fn (Printer $record): string => $record->is_polling ? 'warning' : 'gray')
                     ->requiresConfirmation()
+                    ->disabled(fn (Printer $record): bool => (bool) $record->is_polling)
                     ->action(function (Printer $record): void {
+                        $record->forceFill([
+                            'is_polling' => true,
+                            'manual_poll_requested_at' => now(),
+                        ])->save();
+
                         PollPrinterJob::dispatch($record->id);
 
                         Notification::make()
                             ->title('Опрос поставлен в очередь')
-                            ->body("Принтер {$record->display_name} будет опрошен в фоне.")
+                            ->body("Принтер {$record->display_name} опрашивается в фоне.")
                             ->success()
                             ->send();
                     }),

@@ -2,17 +2,21 @@
 
 namespace App\Filament\Resources\Printers\Schemas;
 
+use App\Enums\TonerColor;
+use App\Models\Printer;
+use App\Models\TonerSupply;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
-use Filament\Notifications\Notification;
-use App\Models\TonerSupply;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Components\ViewEntry;
-use Filament\Schemas\Schema;
+use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
 
 class PrinterInfolist
 {
@@ -20,42 +24,59 @@ class PrinterInfolist
     {
         return $schema
             ->components([
+                Section::make('Фоновый опрос')
+                    ->visible(fn (Printer $record): bool => (bool) $record->is_polling)
+                    ->schema([
+                        TextEntry::make('manual_poll_requested_at')
+                            ->label('Состояние')
+                            ->state(function (Printer $record): string {
+                                if ($record->manual_poll_requested_at === null) {
+                                    return 'Ручной опрос выполняется в фоне.';
+                                }
+
+                                return sprintf(
+                                    'Ручной опрос выполняется в фоне с %s.',
+                                    $record->manual_poll_requested_at->format('d.m.Y H:i:s'),
+                                );
+                            })
+                            ->badge()
+                            ->color('warning'),
+                    ]),
                 Section::make('Тонеры')
                     ->schema([
                         RepeatableEntry::make('tonerSupplies')
                             ->label('')
-                            ->contained(false)
-                            ->placeholder('Активные тонеры не найдены')
+                            ->contained(true)
+                            ->placeholder('Активные картриджи не найдены')
                             ->schema([
-                                TextEntry::make('color_label')
-                                    ->label('Цвет')
-                                    ->state(fn (TonerSupply $record): string => $record->color_label),
-                                TextEntry::make('snmp_description')
-                                    ->label('Описание')
-                                    ->placeholder('Неизвестно'),
-                                ViewEntry::make('percentage')
-                                    ->label('Уровень')
-                                    ->view('filament.infolists.entries.toner-progress'),
-                                TextEntry::make('level')
-                                    ->label('Значение')
-                                    ->placeholder('Неизвестно'),
-                                TextEntry::make('max_capacity')
-                                    ->label('Емкость')
-                                    ->placeholder('Неизвестно'),
-                                TextEntry::make('status_label')
-                                    ->label('Статус')
-                                    ->state(fn (TonerSupply $record): string => $record->status_label)
-                                    ->badge()
-                                    ->color(fn (TonerSupply $record): string => $record->isLow() ? 'danger' : ($record->percentage === null ? 'warning' : 'success')),
-                                TextEntry::make('service_status_label')
-                                    ->label('Обслуживание')
-                                    ->badge()
-                                    ->color(fn (TonerSupply $record): string => $record->is_on_service ? 'warning' : 'success'),
-                                TextEntry::make('comment_display')
-                                    ->label('Комментарий')
-                                    ->placeholder('Без комментария')
-                                    ->columnSpanFull()
-                                    ->suffixAction(self::editSupplyMetadataAction('edit_active_supply_metadata')),
+                                Group::make([
+                                    TextEntry::make('color_label')
+                                        ->label('Цвет')
+                                        ->badge()
+                                        ->state(fn (TonerSupply $record): string => $record->color_label)
+                                        ->color(fn (TonerSupply $record): string => $record->color_badge_color),
+                                    TextEntry::make('status_label')
+                                        ->label('Статус')
+                                        ->state(fn (TonerSupply $record): string => $record->status_label)
+                                        ->badge()
+                                        ->color(fn (TonerSupply $record): string => $record->isLow() ? 'danger' : ($record->percentage === null ? 'warning' : 'success')),
+                                    TextEntry::make('service_status_label')
+                                        ->label('Обслуживание')
+                                        ->badge()
+                                        ->color(fn (TonerSupply $record): string => $record->is_on_service ? 'warning' : 'success'),
+                                ])->columnSpan(1),
+                                Group::make([
+                                    TextEntry::make('snmp_description')
+                                        ->label('Описание')
+                                        ->placeholder('Неизвестно'),
+                                    ViewEntry::make('percentage')
+                                        ->label('% тонера')
+                                        ->view('filament.infolists.entries.toner-progress'),
+                                    TextEntry::make('comment_display')
+                                        ->label('Комментарий')
+                                        ->placeholder('Без комментария')
+                                        ->suffixAction(self::editSupplyMetadataAction('edit_active_supply_metadata')),
+                                ])->columnSpan(1),
                             ])
                             ->columns(2),
                     ])
@@ -65,35 +86,39 @@ class PrinterInfolist
                     ->schema([
                         RepeatableEntry::make('tonerHistory')
                             ->label('')
-                            ->contained(false)
+                            ->contained(true)
                             ->placeholder('История картриджей пуста')
                             ->schema([
-                                TextEntry::make('color_label')
-                                    ->label('Цвет')
-                                    ->state(fn (TonerSupply $record): string => $record->color_label),
-                                TextEntry::make('snmp_description')
-                                    ->label('Описание')
-                                    ->placeholder('Неизвестно'),
-                                TextEntry::make('percentage_display')
-                                    ->label('Последний уровень')
-                                    ->state(fn (TonerSupply $record): string => $record->percentage_display),
-                                TextEntry::make('last_seen_at')
-                                    ->label('Последний раз в принтере')
-                                    ->dateTime()
-                                    ->placeholder('Неизвестно'),
-                                TextEntry::make('removed_at')
-                                    ->label('Перемещен в историю')
-                                    ->dateTime()
-                                    ->placeholder('Неизвестно'),
-                                TextEntry::make('service_status_label')
-                                    ->label('Обслуживание')
-                                    ->badge()
-                                    ->color(fn (TonerSupply $record): string => $record->is_on_service ? 'warning' : 'success'),
-                                TextEntry::make('comment_display')
-                                    ->label('Комментарий')
-                                    ->placeholder('Без комментария')
-                                    ->columnSpanFull()
-                                    ->suffixAction(self::editSupplyMetadataAction('edit_history_supply_metadata')),
+                                Group::make([
+                                    TextEntry::make('color_label')
+                                        ->label('Цвет')
+                                        ->badge()
+                                        ->state(fn (TonerSupply $record): string => $record->color_label)
+                                        ->color(fn (TonerSupply $record): string => $record->color_badge_color),
+                                    TextEntry::make('last_seen_at')
+                                        ->label('Последний раз в принтере')
+                                        ->dateTime()
+                                        ->placeholder('Неизвестно'),
+                                    TextEntry::make('service_status_label')
+                                        ->label('Обслуживание')
+                                        ->badge()
+                                        ->color(fn (TonerSupply $record): string => $record->is_on_service ? 'warning' : 'success'),
+                                ])->columnSpan(1),
+                                Group::make([
+                                    TextEntry::make('snmp_description')
+                                        ->label('Описание')
+                                        ->placeholder('Неизвестно'),
+                                    TextEntry::make('percentage_display')
+                                        ->label('% тонера'),
+                                    TextEntry::make('comment_display')
+                                        ->label('Комментарий')
+                                        ->placeholder('Без комментария')
+                                        ->suffixAction(self::editSupplyMetadataAction('edit_history_supply_metadata')),
+                                    TextEntry::make('removed_at')
+                                        ->label('Перемещен в историю')
+                                        ->dateTime()
+                                        ->placeholder('Неизвестно'),
+                                ])->columnSpan(1),
                             ])
                             ->columns(2),
                     ])
@@ -139,20 +164,27 @@ class PrinterInfolist
         return Action::make($name)
             ->icon('heroicon-m-pencil-square')
             ->label('Изменить')
-            ->modalHeading('Комментарий и обслуживание')
+            ->modalHeading('Параметры картриджа')
             ->schema([
+                Select::make('color')
+                    ->label('Цвет')
+                    ->options(self::colorOptions())
+                    ->required(),
+                Toggle::make('is_on_service')
+                    ->label('Отправлен на обслуживание'),
                 Textarea::make('comment')
                     ->label('Комментарий')
                     ->rows(3),
-                Toggle::make('is_on_service')
-                    ->label('Отправлен на обслуживание'),
             ])
             ->fillForm(fn (TonerSupply $record): array => [
+                'color' => $record->color?->value ?? TonerColor::Unknown->value,
                 'comment' => $record->comment,
                 'is_on_service' => $record->is_on_service,
             ])
             ->action(function (TonerSupply $record, array $data): void {
                 $record->update([
+                    'color' => $data['color'],
+                    'is_color_manual' => true,
                     'comment' => filled($data['comment'] ?? null) ? trim((string) $data['comment']) : null,
                     'is_on_service' => (bool) ($data['is_on_service'] ?? false),
                 ]);
@@ -162,5 +194,19 @@ class PrinterInfolist
                     ->success()
                     ->send();
             });
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private static function colorOptions(): array
+    {
+        $options = [];
+
+        foreach (TonerColor::cases() as $color) {
+            $options[$color->value] = $color->label();
+        }
+
+        return $options;
     }
 }

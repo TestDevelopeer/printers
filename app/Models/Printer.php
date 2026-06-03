@@ -27,8 +27,10 @@ class Printer extends Model
         'status',
         'last_seen_at',
         'last_polled_at',
+        'manual_poll_requested_at',
         'last_error',
         'is_active',
+        'is_polling',
     ];
 
     protected function casts(): array
@@ -37,7 +39,9 @@ class Printer extends Model
             'status' => PrinterStatus::class,
             'last_seen_at' => 'datetime',
             'last_polled_at' => 'datetime',
+            'manual_poll_requested_at' => 'datetime',
             'is_active' => 'boolean',
+            'is_polling' => 'boolean',
         ];
     }
 
