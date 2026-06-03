@@ -31,6 +31,8 @@ class TonerSupply extends Model
         'last_seen_at',
         'comment',
         'is_on_service',
+        'transfer_target_printer_id',
+        'transfer_detected_at',
     ];
 
     protected function casts(): array
@@ -45,6 +47,7 @@ class TonerSupply extends Model
             'last_seen_at' => 'datetime',
             'is_on_service' => 'boolean',
             'is_color_manual' => 'boolean',
+            'transfer_detected_at' => 'datetime',
         ];
     }
 
@@ -53,10 +56,28 @@ class TonerSupply extends Model
         return $this->belongsTo(Printer::class);
     }
 
+    public function transferTargetPrinter(): BelongsTo
+    {
+        return $this->belongsTo(Printer::class, 'transfer_target_printer_id');
+    }
+
     public function isLow(): bool
     {
         return $this->percentage !== null
             && $this->percentage <= config('printers.low_toner_threshold', 15);
+    }
+
+    public function needsTransferConfirmation(): bool
+    {
+        return $this->transfer_target_printer_id !== null
+            && $this->transfer_target_printer_id !== $this->printer_id;
+    }
+
+    public function isPendingForPrinter(?int $printerId): bool
+    {
+        return $printerId !== null
+            && $this->transfer_target_printer_id === $printerId
+            && $this->needsTransferConfirmation();
     }
 
     public function getStatusLabelAttribute(): string
@@ -96,6 +117,19 @@ class TonerSupply extends Model
     public function getServiceStatusLabelAttribute(): string
     {
         return $this->is_on_service ? 'На обслуживании' : 'В работе';
+    }
+
+    public function getTransferWarningAttribute(): ?string
+    {
+        if (! $this->needsTransferConfirmation()) {
+            return null;
+        }
+
+        $printer = $this->relationLoaded('printer') ? $this->printer : $this->printer()->first();
+        $printerName = $printer?->display_name ?? 'другому принтеру';
+        $printerIp = $printer?->ip_address ? " ({$printer->ip_address})" : '';
+
+        return "Ранее принадлежал принтеру {$printerName}{$printerIp}";
     }
 
     public function getIdentityKeyAttribute(): string

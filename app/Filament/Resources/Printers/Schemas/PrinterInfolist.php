@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Printers\Schemas;
 use App\Enums\TonerColor;
 use App\Models\Printer;
 use App\Models\TonerSupply;
+use App\Services\Printers\PrinterPollingService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -44,8 +45,9 @@ class PrinterInfolist
                     ]),
                 Section::make('Тонеры')
                     ->schema([
-                        RepeatableEntry::make('tonerSupplies')
+                        RepeatableEntry::make('displayed_toner_supplies')
                             ->label('')
+                            ->state(fn (Printer $record) => $record->displayed_toner_supplies)
                             ->contained(true)
                             ->placeholder('Активные картриджи не найдены')
                             ->schema([
@@ -69,6 +71,13 @@ class PrinterInfolist
                                     TextEntry::make('snmp_description')
                                         ->label('Описание')
                                         ->placeholder('Неизвестно'),
+                                    TextEntry::make('transfer_warning')
+                                        ->label('Предупреждение')
+                                        ->placeholder('')
+                                        ->badge()
+                                        ->color('warning')
+                                        ->visible(fn (TonerSupply $record): bool => $record->needsTransferConfirmation())
+                                        ->suffixAction(self::confirmTransferAction()),
                                     ViewEntry::make('percentage')
                                         ->label('% тонера')
                                         ->view('filament.infolists.entries.toner-progress'),
@@ -157,6 +166,25 @@ class PrinterInfolist
                     ->collapsible()
                     ->collapsed(),
             ]);
+    }
+
+    private static function confirmTransferAction(): Action
+    {
+        return Action::make('confirm_transfer')
+            ->icon('heroicon-m-check-badge')
+            ->label('Подтвердить перенос')
+            ->requiresConfirmation()
+            ->modalHeading('Подтвердить перенос картриджа')
+            ->modalDescription('После подтверждения картридж будет перепривязан к текущему принтеру.')
+            ->visible(fn (TonerSupply $record): bool => $record->needsTransferConfirmation())
+            ->action(function (TonerSupply $record): void {
+                app(PrinterPollingService::class)->confirmPendingTransfer($record);
+
+                Notification::make()
+                    ->title('Перенос картриджа подтвержден')
+                    ->success()
+                    ->send();
+            });
     }
 
     private static function editSupplyMetadataAction(string $name): Action

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\PrinterStatus;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -57,6 +58,7 @@ class Printer extends Model
     {
         return $this->hasMany(TonerSupply::class)
             ->whereNotNull('removed_at')
+            ->whereNull('transfer_target_printer_id')
             ->orderByDesc('removed_at')
             ->orderBy('color')
             ->orderBy('snmp_description');
@@ -69,6 +71,14 @@ class Printer extends Model
             ->orderBy('snmp_description');
     }
 
+    public function incomingPendingTonerSupplies(): HasMany
+    {
+        return $this->hasMany(TonerSupply::class, 'transfer_target_printer_id')
+            ->whereColumn('toner_supplies.printer_id', '!=', 'toner_supplies.transfer_target_printer_id')
+            ->orderBy('color')
+            ->orderBy('snmp_description');
+    }
+
     public function cartridgeSets(): HasMany
     {
         return $this->hasMany(CartridgeSet::class);
@@ -77,6 +87,31 @@ class Printer extends Model
     public function getDisplayNameAttribute(): string
     {
         return $this->name ?: ($this->discovered_name ?: $this->ip_address);
+    }
+
+    public function getDisplayedTonerSuppliesAttribute(): EloquentCollection
+    {
+        $activeSupplies = $this->tonerSupplies()
+            ->where(function ($query): void {
+                $query->whereNull('transfer_target_printer_id')
+                    ->orWhere('transfer_target_printer_id', $this->getKey());
+            })
+            ->get();
+
+        $incomingSupplies = TonerSupply::query()
+            ->with(['printer', 'transferTargetPrinter'])
+            ->where('transfer_target_printer_id', $this->getKey())
+            ->where('printer_id', '!=', $this->getKey())
+            ->get();
+
+        return $activeSupplies
+            ->merge($incomingSupplies)
+            ->unique('id')
+            ->sortBy([
+                fn (TonerSupply $supply) => $supply->color?->value ?? 'unknown',
+                fn (TonerSupply $supply) => $supply->snmp_description ?? '',
+            ])
+            ->values();
     }
 
     public function getTonerSummaryAttribute(): string

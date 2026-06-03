@@ -29,6 +29,35 @@ class PrinterAlertService
         $this->notifyLowTonerChanges($printer, $previousLowTonerStates);
     }
 
+    public function notifyForeignSupplyDetected(Printer $targetPrinter, TonerSupply $supply): void
+    {
+        $sourcePrinter = $supply->printer;
+
+        if (! $sourcePrinter instanceof Printer) {
+            return;
+        }
+
+        $this->telegramBotService->sendMessage(implode("\n", [
+            '⚠️ Обнаружен картридж от другого принтера',
+            "🖨️ Новый принтер: {$targetPrinter->display_name}",
+            "🌐 IP: {$targetPrinter->ip_address}",
+            '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
+            "↩️ Ранее принадлежал: {$sourcePrinter->display_name} ({$sourcePrinter->ip_address})",
+            '📝 Действие: требуется подтверждение переноса',
+        ]));
+    }
+
+    public function notifyTransferConfirmed(TonerSupply $supply, Printer $previousPrinter, Printer $targetPrinter): void
+    {
+        $this->telegramBotService->sendMessage(implode("\n", [
+            '✅ Перенос картриджа подтвержден',
+            "🖨️ Новый принтер: {$targetPrinter->display_name}",
+            "🌐 IP: {$targetPrinter->ip_address}",
+            '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
+            "↪️ Перенесен из: {$previousPrinter->display_name} ({$previousPrinter->ip_address})",
+        ]));
+    }
+
     private function notifyPrinterStatusChange(Printer $printer, ?PrinterStatus $previousStatus): void
     {
         $currentStatus = $printer->status;
@@ -38,12 +67,12 @@ class PrinterAlertService
         }
 
         if (in_array($currentStatus, [PrinterStatus::Offline, PrinterStatus::Error], true)) {
-            $this->telegramBotService->sendMessage(sprintf(
-                'Принтер %s (%s) сменил статус: %s.',
-                $printer->display_name,
-                $printer->ip_address,
-                $currentStatus->label(),
-            ));
+            $this->telegramBotService->sendMessage(implode("\n", [
+                $currentStatus === PrinterStatus::Error ? '🚨 Изменение статуса принтера' : '📴 Изменение статуса принтера',
+                "🖨️ Принтер: {$printer->display_name}",
+                "🌐 IP: {$printer->ip_address}",
+                "📍 Новый статус: {$currentStatus->label()}",
+            ]));
 
             return;
         }
@@ -52,11 +81,12 @@ class PrinterAlertService
             $currentStatus === PrinterStatus::Online
             && in_array($previousStatus, [PrinterStatus::Offline, PrinterStatus::Error], true)
         ) {
-            $this->telegramBotService->sendMessage(sprintf(
-                'Принтер %s (%s) снова в сети.',
-                $printer->display_name,
-                $printer->ip_address,
-            ));
+            $this->telegramBotService->sendMessage(implode("\n", [
+                '✅ Принтер снова в сети',
+                "🖨️ Принтер: {$printer->display_name}",
+                "🌐 IP: {$printer->ip_address}",
+                "📍 Новый статус: {$currentStatus->label()}",
+            ]));
         }
     }
 
@@ -78,22 +108,18 @@ class PrinterAlertService
         foreach ($previousActiveSupplies as $slotKey => $previousSupply) {
             $currentSupply = $currentSupplies[$slotKey] ?? null;
 
-            if ($currentSupply === null) {
+            if ($currentSupply === null || $currentSupply === $previousSupply) {
                 continue;
             }
 
-            if ($currentSupply === $previousSupply) {
-                continue;
-            }
-
-            $this->telegramBotService->sendMessage(sprintf(
-                'В принтере %s (%s) заменен картридж в слоте %s: было %s, стало %s.',
-                $printer->display_name,
-                $printer->ip_address,
-                $slotKey,
-                $this->formatSupplyLabel($previousSupply['color'], $previousSupply['description']),
-                $this->formatSupplyLabel($currentSupply['color'], $currentSupply['description']),
-            ));
+            $this->telegramBotService->sendMessage(implode("\n", [
+                '🔄 Заменен картридж',
+                "🖨️ Принтер: {$printer->display_name}",
+                "🌐 IP: {$printer->ip_address}",
+                "🧩 Слот: {$slotKey}",
+                '⬅️ Было: '.$this->formatSupplyLabel($previousSupply['color'], $previousSupply['description']),
+                '➡️ Стало: '.$this->formatSupplyLabel($currentSupply['color'], $currentSupply['description']),
+            ]));
         }
     }
 
@@ -124,34 +150,49 @@ class PrinterAlertService
 
     private function formatLowTonerMessage(Printer $printer, TonerSupply $supply): string
     {
-        return sprintf(
-            'Низкий уровень тонера: %s (%s), %s, %s, остаток %s.',
-            $printer->display_name,
-            $printer->ip_address,
-            $supply->color_label,
-            $supply->snmp_description ?: 'без описания',
-            $supply->percentage_display,
-        );
+        return implode("\n", [
+            '🟡 Низкий уровень тонера',
+            "🖨️ Принтер: {$printer->display_name}",
+            "🌐 IP: {$printer->ip_address}",
+            '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
+            "📉 Остаток: {$supply->percentage_display}",
+        ]);
     }
 
     private function formatRecoveredTonerMessage(Printer $printer, TonerSupply $supply): string
     {
-        return sprintf(
-            'Тонер восстановился: %s (%s), %s, %s, текущий уровень %s.',
-            $printer->display_name,
-            $printer->ip_address,
-            $supply->color_label,
-            $supply->snmp_description ?: 'без описания',
-            $supply->percentage_display,
-        );
+        return implode("\n", [
+            '🟢 Тонер восстановился',
+            "🖨️ Принтер: {$printer->display_name}",
+            "🌐 IP: {$printer->ip_address}",
+            '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
+            "📈 Текущий уровень: {$supply->percentage_display}",
+        ]);
     }
 
     private function formatSupplyLabel(string $color, ?string $description): string
     {
+        $emoji = $this->colorEmoji($color);
+        $prefix = "{$emoji} {$color}";
+
         if (blank($description)) {
-            return $color;
+            return $prefix;
         }
 
-        return sprintf('%s (%s)', $color, $description);
+        return sprintf('%s (%s)', $prefix, $description);
+    }
+
+    private function colorEmoji(string $color): string
+    {
+        $normalized = mb_strtolower(trim($color));
+
+        return match ($normalized) {
+            'черный', 'black' => '⚫',
+            'голубой', 'cyan' => '🔵',
+            'пурпурный', 'magenta' => '🟣',
+            'желтый', 'yellow' => '🟡',
+            'отработка', 'waste' => '🗑️',
+            default => '⚪',
+        };
     }
 }

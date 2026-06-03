@@ -20,28 +20,10 @@ class PrinterAlertsTest extends TestCase
 
     public function test_it_sends_telegram_notifications_only_when_low_toner_state_changes(): void
     {
-        config([
-            'printers.telegram.bot_token' => 'token',
-            'printers.telegram.chat_id' => 'chat',
-        ]);
+        $this->fakeTelegram();
 
-        Http::fake([
-            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
-
-        $printer = Printer::query()->create([
-            'name' => 'Kyocera',
-            'ip_address' => '192.168.1.25',
-            'snmp_community' => 'public',
-            'snmp_version' => '2c',
-            'status' => PrinterStatus::Unknown,
-            'is_active' => true,
-        ]);
-
-        $service = new PrinterPollingService(
-            new PrinterSnmpService(),
-            new PrinterAlertService(new TelegramBotService()),
-        );
+        $printer = $this->makePrinter('192.168.1.25');
+        $service = $this->makeService();
 
         $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
             ipAddress: '192.168.1.25',
@@ -104,23 +86,9 @@ class PrinterAlertsTest extends TestCase
 
     public function test_it_notifies_when_printer_goes_offline_and_does_not_repeat_same_status(): void
     {
-        config([
-            'printers.telegram.bot_token' => 'token',
-            'printers.telegram.chat_id' => 'chat',
-        ]);
+        $this->fakeTelegram();
 
-        Http::fake([
-            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
-
-        $printer = Printer::query()->create([
-            'name' => 'Kyocera',
-            'ip_address' => '192.168.1.25',
-            'snmp_community' => 'public',
-            'snmp_version' => '2c',
-            'status' => PrinterStatus::Online,
-            'is_active' => true,
-        ]);
+        $printer = $this->makePrinter('192.168.1.25', PrinterStatus::Online);
 
         $snmpService = new class extends PrinterSnmpService
         {
@@ -143,33 +111,15 @@ class PrinterAlertsTest extends TestCase
         $service->poll($printer->fresh());
 
         Http::assertSentCount(1);
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'сменил статус'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Изменение статуса принтера'));
     }
 
     public function test_it_notifies_when_active_cartridge_is_replaced(): void
     {
-        config([
-            'printers.telegram.bot_token' => 'token',
-            'printers.telegram.chat_id' => 'chat',
-        ]);
+        $this->fakeTelegram();
 
-        Http::fake([
-            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
-
-        $printer = Printer::query()->create([
-            'name' => 'Kyocera',
-            'ip_address' => '192.168.1.25',
-            'snmp_community' => 'public',
-            'snmp_version' => '2c',
-            'status' => PrinterStatus::Unknown,
-            'is_active' => true,
-        ]);
-
-        $service = new PrinterPollingService(
-            new PrinterSnmpService(),
-            new PrinterAlertService(new TelegramBotService()),
-        );
+        $printer = $this->makePrinter('192.168.1.25');
+        $service = $this->makeService();
 
         $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
             ipAddress: '192.168.1.25',
@@ -212,6 +162,214 @@ class PrinterAlertsTest extends TestCase
         ));
 
         Http::assertSentCount(1);
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'заменен картридж'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Заменен картридж'));
+    }
+
+    public function test_it_notifies_when_foreign_cartridge_is_detected(): void
+    {
+        $this->fakeTelegram();
+
+        $printerA = $this->makePrinter('192.168.1.30', PrinterStatus::Unknown, 'Printer A');
+        $printerB = $this->makePrinter('192.168.1.31', PrinterStatus::Unknown, 'Printer B');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.30',
+            tonerSupplies: [[
+                'slot_key' => '1',
+                'color' => 'black',
+                'snmp_description' => 'TK-5240K',
+                'level' => 60,
+                'max_capacity' => 100,
+                'percentage' => 60,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '1',
+                    'description' => 'TK-5240K',
+                ],
+            ]],
+        ));
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.31',
+            tonerSupplies: [[
+                'slot_key' => '2',
+                'color' => 'black',
+                'snmp_description' => 'TK-5240K',
+                'level' => 58,
+                'max_capacity' => 100,
+                'percentage' => 58,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '2',
+                    'description' => 'TK-5240K',
+                ],
+            ]],
+        ));
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Обнаружен картридж от другого принтера'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'требуется подтверждение переноса'));
+    }
+
+    public function test_it_notifies_when_pending_transfer_is_confirmed(): void
+    {
+        $this->fakeTelegram();
+
+        $printerA = $this->makePrinter('192.168.1.40', PrinterStatus::Unknown, 'Printer A');
+        $printerB = $this->makePrinter('192.168.1.41', PrinterStatus::Unknown, 'Printer B');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.40',
+            tonerSupplies: [[
+                'slot_key' => '1',
+                'color' => 'cyan',
+                'snmp_description' => 'TK-5240C',
+                'level' => 62,
+                'max_capacity' => 100,
+                'percentage' => 62,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '1',
+                    'description' => 'TK-5240C',
+                ],
+            ]],
+        ));
+
+        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.41',
+            tonerSupplies: [[
+                'slot_key' => '3',
+                'color' => 'cyan',
+                'snmp_description' => 'TK-5240C',
+                'level' => 61,
+                'max_capacity' => 100,
+                'percentage' => 61,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '3',
+                    'description' => 'TK-5240C',
+                ],
+            ]],
+        ));
+
+        $pendingSupply = $printerA->fresh()->allTonerSupplies()->first();
+        $this->assertNotNull($pendingSupply);
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $service->confirmPendingTransfer($pendingSupply);
+
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Перенос картриджа подтвержден'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Перенесен из: Printer A'));
+    }
+
+    public function test_it_silently_clears_pending_transfer_when_supply_returns_back(): void
+    {
+        $this->fakeTelegram();
+
+        $printerA = $this->makePrinter('192.168.1.50', PrinterStatus::Unknown, 'Printer A');
+        $printerB = $this->makePrinter('192.168.1.51', PrinterStatus::Unknown, 'Printer B');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.50',
+            tonerSupplies: [[
+                'slot_key' => '1',
+                'color' => 'magenta',
+                'snmp_description' => 'TK-5240M',
+                'level' => 62,
+                'max_capacity' => 100,
+                'percentage' => 62,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '1',
+                    'description' => 'TK-5240M',
+                ],
+            ]],
+        ));
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.51',
+            tonerSupplies: [[
+                'slot_key' => '2',
+                'color' => 'magenta',
+                'snmp_description' => 'TK-5240M',
+                'level' => 60,
+                'max_capacity' => 100,
+                'percentage' => 60,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '2',
+                    'description' => 'TK-5240M',
+                ],
+            ]],
+        ));
+
+        Http::assertSentCount(1);
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+
+        $service->syncFromDiscovery($printerB->fresh(), new DiscoveredPrinterData(
+            ipAddress: '192.168.1.51',
+            tonerSupplies: [],
+        ));
+
+        Http::assertNothingSent();
+    }
+
+    private function fakeTelegram(): void
+    {
+        config([
+            'printers.telegram.bot_token' => 'token',
+            'printers.telegram.chat_id' => 'chat',
+        ]);
+
+        Http::fake([
+            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
+        ]);
+    }
+
+    private function makeService(): PrinterPollingService
+    {
+        return new PrinterPollingService(
+            new PrinterSnmpService(),
+            new PrinterAlertService(new TelegramBotService()),
+        );
+    }
+
+    private function makePrinter(
+        string $ipAddress,
+        PrinterStatus $status = PrinterStatus::Unknown,
+        string $name = 'Kyocera',
+    ): Printer {
+        return Printer::query()->create([
+            'name' => $name,
+            'ip_address' => $ipAddress,
+            'snmp_community' => 'public',
+            'snmp_version' => '2c',
+            'status' => $status,
+            'is_active' => true,
+        ]);
     }
 }
