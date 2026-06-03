@@ -216,7 +216,7 @@ class PrinterAlertsTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_it_notifies_when_foreign_cartridge_is_detected_from_history(): void
+    public function test_it_does_not_notify_when_history_on_another_printer_has_same_model(): void
     {
         $this->fakeTelegram();
 
@@ -269,6 +269,10 @@ class PrinterAlertsTest extends TestCase
             ]],
         ));
 
+        Http::assertNothingSent();
+
+        return;
+
         Http::assertSentCount(1);
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Обнаружен картридж от другого принтера'));
         Http::assertSent(fn ($request) => str_contains($request['text'], 'требуется подтверждение переноса'));
@@ -305,26 +309,12 @@ class PrinterAlertsTest extends TestCase
             tonerSupplies: [],
         ));
 
-        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.61',
-            tonerSupplies: [[
-                'slot_key' => '3',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 61,
-                'max_capacity' => 100,
-                'percentage' => 61,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '3',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
-
         $pendingSupply = $printerA->fresh()->allTonerSupplies()->first();
         $this->assertNotNull($pendingSupply);
+        $pendingSupply->forceFill([
+            'transfer_target_printer_id' => $printerB->id,
+            'transfer_detected_at' => now(),
+        ])->save();
 
         Http::fake([
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
@@ -368,6 +358,13 @@ class PrinterAlertsTest extends TestCase
             tonerSupplies: [],
         ));
 
+        $supply = $printerA->fresh()->allTonerSupplies()->first();
+        $this->assertNotNull($supply);
+        $supply->forceFill([
+            'transfer_target_printer_id' => $printerB->id,
+            'transfer_detected_at' => now(),
+        ])->save();
+
         Http::fake([
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
@@ -388,17 +385,6 @@ class PrinterAlertsTest extends TestCase
                     'description' => 'TK-5240M',
                 ],
             ]],
-        ));
-
-        Http::assertSentCount(1);
-
-        Http::fake([
-            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
-
-        $service->syncFromDiscovery($printerB->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.71',
-            tonerSupplies: [],
         ));
 
         Http::assertNothingSent();

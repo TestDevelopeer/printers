@@ -88,9 +88,7 @@ class PrinterPollingService
         $previousStatus ??= $printer->status;
         $previousLowTonerStates ??= $this->snapshotLowTonerStates($printer);
         $previousActiveSupplies ??= $this->snapshotActiveSupplies($printer);
-        $pendingTransferSupplyIds = [];
-
-        $result = DB::transaction(function () use ($printer, $discovered, &$pendingTransferSupplyIds): array {
+        $result = DB::transaction(function () use ($printer, $discovered): array {
             $now = Carbon::now();
 
             $printer->fill(array_merge(
@@ -106,31 +104,13 @@ class PrinterPollingService
                 ],
             ));
             $printer->save();
-
-            $pendingTransferSupplyIds = $this->syncTonerSupplies($printer, $discovered->tonerSupplies, $now);
+            $this->syncTonerSupplies($printer, $discovered->tonerSupplies, $now);
 
             return [
                 'printer' => $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']),
-                'pending_transfer_supply_ids' => $pendingTransferSupplyIds,
             ];
         });
         $printer = $result['printer'];
-
-        foreach ($result['pending_transfer_supply_ids'] as $supplyId) {
-            $supply = TonerSupply::query()->with(['printer', 'transferTargetPrinter'])->find($supplyId);
-
-            if (! $supply instanceof TonerSupply) {
-                continue;
-            }
-
-            $targetPrinter = $supply->transferTargetPrinter;
-
-            if (! $targetPrinter instanceof Printer) {
-                continue;
-            }
-
-            $this->printerAlertService->notifyForeignSupplyDetected($targetPrinter, $supply);
-        }
 
         $this->printerAlertService->dispatchAlerts(
             $printer,
@@ -244,7 +224,7 @@ class PrinterPollingService
     /**
      * @param  array<int, array<string, mixed>>  $supplies
      */
-    private function syncTonerSupplies(Printer $printer, array $supplies, Carbon $now): array
+    private function syncTonerSupplies(Printer $printer, array $supplies, Carbon $now): void
     {
         $existing = $printer->allTonerSupplies()->get();
         $normalizedSupplies = collect($supplies)
@@ -253,39 +233,32 @@ class PrinterPollingService
             ->values();
 
         $seenIds = [];
-        $pendingSignatures = [];
-        $newPendingTransferSupplyIds = [];
 
         foreach ($normalizedSupplies as $normalized) {
             $slotKey = $normalized['slot_key'];
             $signature = $normalized['supply_signature'];
 
-            $this->deactivateConflictingSlotSupply($existing, $slotKey, $signature, $now, $seenIds);
-
-            $ownSupply = $this->findOwnMatchingSupply($existing, $signature);
+            $ownSupply = $this->findOwnActiveSupplyBySlot($existing, $slotKey);
 
             if ($ownSupply instanceof TonerSupply) {
-                $this->syncOwnedSupply($printer, $ownSupply, $normalized, $now);
-                $seenIds[] = $ownSupply->getKey();
-                continue;
-            }
-
-            $foreignSupply = $this->findForeignTransferCandidate($signature, $printer->getKey());
-
-            if ($foreignSupply instanceof TonerSupply) {
-                $isNewPending = $this->markPendingTransfer($foreignSupply, $printer, $normalized, $now);
-                $pendingSignatures[] = $signature;
-
-                if ($isNewPending) {
-                    $newPendingTransferSupplyIds[] = $foreignSupply->getKey();
+                if ($ownSupply->supply_signature === $signature) {
+                    $this->syncOwnedSupply($printer, $ownSupply, $normalized, $now);
+                    $seenIds[] = $ownSupply->getKey();
+                    continue;
                 }
 
+                $this->moveSupplyToHistory($ownSupply, $now);
+            }
+
+            $renumberedSupply = $this->findOwnActiveMatchingSupply($existing, $signature, $seenIds);
+
+            if ($renumberedSupply instanceof TonerSupply) {
+                $this->syncOwnedSupply($printer, $renumberedSupply, $normalized, $now);
+                $seenIds[] = $renumberedSupply->getKey();
                 continue;
             }
 
-            $newSupply = new TonerSupply([
-                'printer_id' => $printer->getKey(),
-            ]);
+            $newSupply = new TonerSupply(['printer_id' => $printer->getKey()]);
 
             $this->syncOwnedSupply($printer, $newSupply, $normalized, $now);
             $existing->push($newSupply);
@@ -298,16 +271,10 @@ class PrinterPollingService
             ->get();
 
         foreach ($toHistory as $supply) {
-            $supply->forceFill([
-                'removed_at' => $now,
-                'is_on_service' => true,
-                'updated_at' => $now,
-            ])->save();
+            $this->moveSupplyToHistory($supply, $now);
         }
 
-        $this->clearStalePendingTransfers($printer, $pendingSignatures);
-
-        return $newPendingTransferSupplyIds;
+        $this->clearLegacyPendingTransfers($printer);
     }
 
     /**
@@ -315,8 +282,7 @@ class PrinterPollingService
      */
     private function syncOwnedSupply(Printer $printer, TonerSupply $supply, array $normalized, Carbon $now): void
     {
-        $wasInHistory = $supply->removed_at !== null;
-        $installedAt = $wasInHistory || $supply->installed_at === null
+        $installedAt = $supply->installed_at === null
             ? $now
             : $supply->installed_at;
 
@@ -334,7 +300,7 @@ class PrinterPollingService
             $payload['color'] = $normalized['detected_color'];
         }
 
-        if ($wasInHistory || $supply->needsTransferConfirmation()) {
+        if ($supply->needsTransferConfirmation()) {
             $payload['is_on_service'] = false;
         }
 
@@ -343,47 +309,27 @@ class PrinterPollingService
         $supply->save();
     }
 
-    /**
-     * @param  array<string, mixed>  $normalized
-     */
-    private function markPendingTransfer(TonerSupply $supply, Printer $targetPrinter, array $normalized, Carbon $now): bool
+    private function moveSupplyToHistory(TonerSupply $supply, Carbon $now): void
     {
-        $isNewPending = $supply->transfer_target_printer_id !== $targetPrinter->getKey();
-        $payload = [
-            'slot_key' => $normalized['slot_key'],
-            'supply_signature' => $normalized['supply_signature'],
-            'detected_color' => $normalized['detected_color'],
-            'snmp_description' => $normalized['snmp_description'],
-            'level' => $normalized['level'],
-            'max_capacity' => $normalized['max_capacity'],
-            'percentage' => $normalized['percentage'],
-            'unit' => $normalized['unit'],
-            'is_known' => $normalized['is_known'],
-            'raw_value' => $normalized['raw_value'],
-            'last_seen_at' => $now,
-            'transfer_target_printer_id' => $targetPrinter->getKey(),
-            'transfer_detected_at' => $now,
-        ];
-
-        if (! $supply->is_color_manual) {
-            $payload['color'] = $normalized['detected_color'];
-        }
-
-        $supply->fill($payload);
-        $supply->save();
-
-        return $isNewPending;
+        $supply->forceFill([
+            'removed_at' => $now,
+            'is_on_service' => true,
+            'updated_at' => $now,
+        ])->save();
     }
 
-    private function clearStalePendingTransfers(Printer $printer, array $pendingSignatures): void
+    private function clearLegacyPendingTransfers(Printer $printer): void
     {
-        $query = TonerSupply::query()->where('transfer_target_printer_id', $printer->getKey());
+        foreach (
+            TonerSupply::query()
+                ->where('printer_id', $printer->getKey())
+                ->orWhere('transfer_target_printer_id', $printer->getKey())
+                ->get() as $supply
+        ) {
+            if ($supply->transfer_target_printer_id === null && $supply->transfer_detected_at === null) {
+                continue;
+            }
 
-        if ($pendingSignatures !== []) {
-            $query->whereNotIn('supply_signature', $pendingSignatures);
-        }
-
-        foreach ($query->get() as $supply) {
             $supply->forceFill([
                 'transfer_target_printer_id' => null,
                 'transfer_detected_at' => null,
@@ -405,10 +351,11 @@ class PrinterPollingService
         $rawValue = Arr::get($supplyData, 'raw_value');
         $rawValue = is_array($rawValue) ? $rawValue : [];
         $rawValue['slot_key'] = $slotKey;
+        $observedColor = $this->cleanString(Arr::get($rawValue, 'colorant_value'));
 
         return [
             'slot_key' => $slotKey,
-            'supply_signature' => $this->makeSupplySignature($color, $description),
+            'supply_signature' => $this->makeSupplySignature($color, $description, $rawValue),
             'color' => $color,
             'detected_color' => $color,
             'snmp_description' => $description,
@@ -417,94 +364,57 @@ class PrinterPollingService
             'percentage' => Arr::get($supplyData, 'percentage'),
             'unit' => Arr::get($supplyData, 'unit'),
             'is_known' => (bool) Arr::get($supplyData, 'is_known', false),
-            'raw_value' => $rawValue,
+            'raw_value' => array_merge($rawValue, [
+                'observed_color' => $observedColor,
+            ]),
         ];
     }
 
-    private function findOwnMatchingSupply(EloquentCollection $existing, string $signature): ?TonerSupply
+    private function findOwnActiveSupplyBySlot(EloquentCollection $existing, ?string $slotKey): ?TonerSupply
     {
+        if ($slotKey === null) {
+            return null;
+        }
+
         return $existing
-            ->filter(fn (TonerSupply $supply): bool => $supply->supply_signature === $signature)
-            ->sortByDesc(fn (TonerSupply $supply): int => $supply->removed_at === null ? 1 : 0)
-            ->sortByDesc(fn (TonerSupply $supply): int => $supply->last_seen_at?->getTimestamp() ?? 0)
-            ->first();
-    }
-
-    private function findForeignTransferCandidate(string $signature, int $printerId): ?TonerSupply
-    {
-        $candidates = TonerSupply::query()
-            ->with(['printer', 'transferTargetPrinter'])
-            ->where('supply_signature', $signature)
-            ->where('printer_id', '!=', $printerId)
-            ->get()
-            ->values();
-
-        $pendingForTarget = $candidates->first(
-            fn (TonerSupply $supply): bool => $supply->isPendingForPrinter($printerId),
-        );
-
-        if ($pendingForTarget instanceof TonerSupply) {
-            return $pendingForTarget;
-        }
-
-        $hasActiveCandidate = $candidates->contains(
-            fn (TonerSupply $supply): bool => $supply->removed_at === null,
-        );
-
-        if ($hasActiveCandidate) {
-            return null;
-        }
-
-        $historicalCandidates = $candidates
-            ->filter(
-                fn (TonerSupply $supply): bool => $supply->removed_at !== null
-                    && $supply->transfer_target_printer_id === null,
-            )
-            ->sortByDesc(fn (TonerSupply $supply): int => $supply->last_seen_at?->getTimestamp() ?? 0)
-            ->values();
-
-        if ($historicalCandidates->count() !== 1) {
-            return null;
-        }
-
-        return $historicalCandidates->first();
+            ->first(
+                fn (TonerSupply $supply): bool => $supply->removed_at === null
+                    && $supply->slot_key === $slotKey,
+            );
     }
 
     /**
      * @param  array<int, int>  $seenIds
      */
-    private function deactivateConflictingSlotSupply(
+    private function findOwnActiveMatchingSupply(
         EloquentCollection $existing,
-        ?string $slotKey,
         string $signature,
-        Carbon $now,
         array $seenIds,
-    ): void {
-        if ($slotKey === null) {
-            return;
-        }
-
-        $conflictingSupply = $existing->first(
-            fn (TonerSupply $supply): bool => $supply->slot_key === $slotKey
-                && $supply->removed_at === null
-                && $supply->supply_signature !== $signature
-                && ! in_array($supply->getKey(), $seenIds, true),
-        );
-
-        if (! $conflictingSupply instanceof TonerSupply) {
-            return;
-        }
-
-        $conflictingSupply->forceFill([
-            'removed_at' => $now,
-            'is_on_service' => true,
-            'updated_at' => $now,
-        ])->save();
+    ): ?TonerSupply {
+        return $existing
+            ->filter(
+                fn (TonerSupply $supply): bool => $supply->removed_at === null
+                    && $supply->supply_signature === $signature
+                    && ! in_array($supply->getKey(), $seenIds, true),
+            )
+            ->sortByDesc(fn (TonerSupply $supply): int => $supply->last_seen_at?->getTimestamp() ?? 0)
+            ->first();
     }
 
-    private function makeSupplySignature(string $color, ?string $description): string
+    /**
+     * @param  array<string, mixed>  $rawValue
+     */
+    private function makeSupplySignature(string $color, ?string $description, array $rawValue): string
     {
-        return TonerSupply::buildSupplySignature($color, $description);
+        $parts = array_filter([
+            'marker:'.($this->cleanString(Arr::get($rawValue, 'marker_index')) ?? 'unknown'),
+            'colorant:'.($this->cleanString(Arr::get($rawValue, 'colorant_index')) ?? 'unknown'),
+            'class:'.($this->cleanString(Arr::get($rawValue, 'supply_class')) ?? 'unknown'),
+            'type:'.($this->cleanString(Arr::get($rawValue, 'supply_type')) ?? 'unknown'),
+            TonerSupply::buildSupplySignature($color, $description),
+        ]);
+
+        return implode('|', $parts);
     }
 
     private function cleanString(mixed $value): ?string

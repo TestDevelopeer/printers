@@ -13,9 +13,15 @@ class PrinterSnmpService
     private const SYS_LOCATION = '1.3.6.1.2.1.1.6.0';
     private const PRINTER_NAME = '1.3.6.1.2.1.43.5.1.1.16.1';
     private const SERIAL_NUMBER = '1.3.6.1.2.1.43.5.1.1.17.1';
+    private const SUPPLIES_MARKER_INDEX = '1.3.6.1.2.1.43.11.1.1.2.1';
+    private const SUPPLIES_COLORANT_INDEX = '1.3.6.1.2.1.43.11.1.1.3.1';
+    private const SUPPLIES_CLASS = '1.3.6.1.2.1.43.11.1.1.4.1';
+    private const SUPPLIES_TYPE = '1.3.6.1.2.1.43.11.1.1.5.1';
     private const SUPPLIES_DESCRIPTION = '1.3.6.1.2.1.43.11.1.1.6.1';
+    private const SUPPLIES_UNIT = '1.3.6.1.2.1.43.11.1.1.7.1';
     private const SUPPLIES_LEVEL = '1.3.6.1.2.1.43.11.1.1.9.1';
     private const SUPPLIES_CAPACITY = '1.3.6.1.2.1.43.11.1.1.8.1';
+    private const COLORANT_VALUE = '1.3.6.1.2.1.43.12.1.1.4.1';
 
     /**
      * @return array{description: ?string, hostname: ?string, printer_name: ?string}|null
@@ -133,24 +139,37 @@ class PrinterSnmpService
      */
     private function readTonerSupplies(string $ipAddress, string $community, int $timeoutMs): array
     {
+        $markerIndexes = $this->snmpWalk($ipAddress, self::SUPPLIES_MARKER_INDEX, $community, $timeoutMs);
+        $colorantIndexes = $this->snmpWalk($ipAddress, self::SUPPLIES_COLORANT_INDEX, $community, $timeoutMs);
+        $classes = $this->snmpWalk($ipAddress, self::SUPPLIES_CLASS, $community, $timeoutMs);
+        $types = $this->snmpWalk($ipAddress, self::SUPPLIES_TYPE, $community, $timeoutMs);
         $descriptions = $this->snmpWalk($ipAddress, self::SUPPLIES_DESCRIPTION, $community, $timeoutMs);
+        $units = $this->snmpWalk($ipAddress, self::SUPPLIES_UNIT, $community, $timeoutMs);
         $levels = $this->snmpWalk($ipAddress, self::SUPPLIES_LEVEL, $community, $timeoutMs);
         $capacities = $this->snmpWalk($ipAddress, self::SUPPLIES_CAPACITY, $community, $timeoutMs);
+        $colorantValues = $this->snmpWalk($ipAddress, self::COLORANT_VALUE, $community, $timeoutMs);
 
         $supplies = [];
 
         foreach ($descriptions as $oid => $description) {
             $suffix = $this->oidSuffix($oid);
+            $markerIndex = $this->findBySuffix($markerIndexes, $suffix);
+            $colorantIndex = $this->findBySuffix($colorantIndexes, $suffix);
+            $class = $this->findBySuffix($classes, $suffix);
+            $type = $this->findBySuffix($types, $suffix);
+            $unit = $this->findBySuffix($units, $suffix);
             $level = $this->findBySuffix($levels, $suffix);
             $capacity = $this->findBySuffix($capacities, $suffix);
+            $colorantValue = $this->findColorantValue($colorantValues, $colorantIndex);
             $levelInt = is_numeric($level) ? (int) $level : null;
             $capacityInt = is_numeric($capacity) ? (int) $capacity : null;
             $percentage = $this->calculatePercentage($levelInt, $capacityInt);
             $known = $percentage !== null && $levelInt !== null && $capacityInt !== null && $levelInt >= 0;
+            $detectedColor = $this->detectColor($colorantValue ?: $description);
 
             $supplies[] = [
                 'slot_key' => $suffix,
-                'color' => $this->detectColor($description)->value,
+                'color' => $detectedColor->value,
                 'snmp_description' => $description,
                 'level' => $levelInt,
                 'max_capacity' => $capacityInt,
@@ -159,6 +178,12 @@ class PrinterSnmpService
                 'is_known' => $known,
                 'raw_value' => [
                     'slot_key' => $suffix,
+                    'marker_index' => $markerIndex,
+                    'colorant_index' => $colorantIndex,
+                    'colorant_value' => $colorantValue,
+                    'supply_class' => $class,
+                    'supply_type' => $type,
+                    'supply_unit' => $unit,
                     'description' => $description,
                     'level' => $level,
                     'max_capacity' => $capacity,
@@ -183,6 +208,24 @@ class PrinterSnmpService
     {
         foreach ($walk as $oid => $value) {
             if ($this->oidSuffix($oid) === $suffix) {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, string>  $colorantValues
+     */
+    private function findColorantValue(array $colorantValues, ?string $colorantIndex): ?string
+    {
+        if ($colorantIndex === null) {
+            return null;
+        }
+
+        foreach ($colorantValues as $oid => $value) {
+            if ($this->oidSuffix($oid) === $colorantIndex) {
                 return $value;
             }
         }
