@@ -4,7 +4,6 @@ namespace App\Services\Printers;
 
 use App\Models\Printer;
 use App\Services\Printers\Data\DiscoveredPrinterData;
-use Illuminate\Support\Facades\Artisan;
 use InvalidArgumentException;
 use JsonException;
 use RuntimeException;
@@ -261,8 +260,6 @@ class NetworkScannerService
             return false;
         }
 
-        return class_exists(Process::class)
-            && is_file(base_path('artisan'))
-            && Artisan::has('printers:scan-chunk');
+        return class_exists(Process::class) && is_file(base_path('artisan'));
     }
 }
