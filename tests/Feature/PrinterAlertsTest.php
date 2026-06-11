@@ -33,63 +33,28 @@ class PrinterAlertsTest extends TestCase
         $printer = $this->makePrinter('192.168.1.25');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 10,
-                'max_capacity' => 100,
-                'percentage' => 10,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([$this->supply('1', 'black', 'TK-5240K', 10)]));
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([$this->supply('1', 'black', 'TK-5240K', 8)]));
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([$this->supply('1', 'black', 'TK-5240K', 7)]));
 
-        $service->syncFromDiscovery($printer->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 8,
-                'max_capacity' => 100,
-                'percentage' => 8,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
+        Http::assertSentCount(1);
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Низкий уровень тонера'));
+    }
 
-        $service->syncFromDiscovery($printer->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 65,
-                'max_capacity' => 100,
-                'percentage' => 65,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
+    public function test_it_sends_recovered_toner_notification_without_replacement_duplicate(): void
+    {
+        $this->fakeTelegram();
+
+        $printer = $this->makePrinter('192.168.1.25');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printer, $this->discovery([$this->supply('1', 'black', 'TK-5240K', 14)]));
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([$this->supply('1', 'black', 'TK-5240K', 16)]));
 
         Http::assertSentCount(2);
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Низкий уровень тонера'));
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Тонер восстановился'));
+        Http::assertSent(fn ($request) => ! str_contains($request['text'], 'Заменён картридж'));
     }
 
     public function test_it_deduplicates_repeated_low_toner_notifications_for_same_supply(): void
@@ -99,23 +64,7 @@ class PrinterAlertsTest extends TestCase
         $printer = $this->makePrinter('192.168.1.26');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.26',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 9,
-                'max_capacity' => 100,
-                'percentage' => 9,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([$this->supply('1', 'black', 'TK-5240K', 9)]));
 
         $printer = $printer->fresh(['tonerSupplies']);
         app(PrinterAlertService::class)->dispatchAlerts($printer, $printer->status, []);
@@ -153,278 +102,54 @@ class PrinterAlertsTest extends TestCase
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Изменение статуса принтера'));
     }
 
-    public function test_it_notifies_when_active_cartridge_is_replaced(): void
+    public function test_it_notifies_when_toner_level_increase_indicates_replacement(): void
     {
         $this->fakeTelegram();
 
         $printer = $this->makePrinter('192.168.1.25');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'yellow',
-                'snmp_description' => 'TK-5240Y',
-                'level' => 70,
-                'max_capacity' => 100,
-                'percentage' => 70,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240Y',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([$this->supply('1', 'yellow', 'TK-5240Y', 15)]));
 
         Http::fake([
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
 
-        $service->syncFromDiscovery($printer->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 85,
-                'max_capacity' => 100,
-                'percentage' => 85,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([$this->supply('1', 'yellow', 'TK-5240Y', 85)]));
 
         Http::assertSentCount(1);
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'Заменен картридж'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'Заменён картридж'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], 'TK-5240Y'));
+        Http::assertSent(fn ($request) => ! str_contains($request['text'], 'Тонер восстановился'));
     }
 
-    public function test_it_does_not_notify_when_identical_active_cartridges_exist_on_different_printers(): void
+    public function test_it_does_not_notify_replacement_when_only_description_changes(): void
     {
         $this->fakeTelegram();
 
-        $printerA = $this->makePrinter('192.168.1.30', PrinterStatus::Unknown, 'Printer A');
-        $printerB = $this->makePrinter('192.168.1.31', PrinterStatus::Unknown, 'Printer B');
+        $printer = $this->makePrinter('192.168.1.30');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.30',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 60,
-                'max_capacity' => 100,
-                'percentage' => 60,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([$this->supply('1', 'yellow', 'TK-5240Y', 70)]));
 
         Http::fake([
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
 
-        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.31',
-            tonerSupplies: [[
-                'slot_key' => '2',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 58,
-                'max_capacity' => 100,
-                'percentage' => 58,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '2',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
-
-        Http::assertNothingSent();
-    }
-
-    public function test_it_does_not_notify_when_history_on_another_printer_has_same_model(): void
-    {
-        $this->fakeTelegram();
-
-        $printerA = $this->makePrinter('192.168.1.40', PrinterStatus::Unknown, 'Printer A');
-        $printerB = $this->makePrinter('192.168.1.41', PrinterStatus::Unknown, 'Printer B');
-        $service = $this->makeService();
-
-        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.40',
-            tonerSupplies: [[
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([[
+            'slot_key' => '1',
+            'color' => 'cyan',
+            'snmp_description' => 'TK-5240C',
+            'level' => 71,
+            'max_capacity' => 100,
+            'percentage' => 71,
+            'unit' => 'percent',
+            'is_known' => true,
+            'raw_value' => [
                 'slot_key' => '1',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 62,
-                'max_capacity' => 100,
-                'percentage' => 62,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
-
-        $service->syncFromDiscovery($printerA->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.40',
-            tonerSupplies: [],
-        ));
-
-        Http::fake([
-            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
-
-        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.41',
-            tonerSupplies: [[
-                'slot_key' => '3',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 61,
-                'max_capacity' => 100,
-                'percentage' => 61,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '3',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
-
-        Http::assertNothingSent();
-
-        return;
-
-        Http::assertSentCount(1);
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'Обнаружен картридж от другого принтера'));
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'требуется подтверждение переноса'));
-    }
-
-    public function test_it_notifies_when_pending_transfer_is_confirmed(): void
-    {
-        $this->fakeTelegram();
-
-        $printerA = $this->makePrinter('192.168.1.60', PrinterStatus::Unknown, 'Printer A');
-        $printerB = $this->makePrinter('192.168.1.61', PrinterStatus::Unknown, 'Printer B');
-        $service = $this->makeService();
-
-        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.60',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 62,
-                'max_capacity' => 100,
-                'percentage' => 62,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
-
-        $service->syncFromDiscovery($printerA->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.60',
-            tonerSupplies: [],
-        ));
-
-        $pendingSupply = $printerA->fresh()->allTonerSupplies()->first();
-        $this->assertNotNull($pendingSupply);
-        $pendingSupply->forceFill([
-            'transfer_target_printer_id' => $printerB->id,
-            'transfer_detected_at' => now(),
-        ])->save();
-
-        Http::fake([
-            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
-
-        $service->confirmPendingTransfer($pendingSupply);
-
-        Http::assertSentCount(1);
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'Перенос картриджа подтвержден'));
-        Http::assertSent(fn ($request) => str_contains($request['text'], 'Перенесен из: Printer A'));
-    }
-
-    public function test_it_silently_clears_pending_transfer_when_supply_returns_back(): void
-    {
-        $this->fakeTelegram();
-
-        $printerA = $this->makePrinter('192.168.1.70', PrinterStatus::Unknown, 'Printer A');
-        $printerB = $this->makePrinter('192.168.1.71', PrinterStatus::Unknown, 'Printer B');
-        $service = $this->makeService();
-
-        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.70',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'magenta',
-                'snmp_description' => 'TK-5240M',
-                'level' => 62,
-                'max_capacity' => 100,
-                'percentage' => 62,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240M',
-                ],
-            ]],
-        ));
-
-        $service->syncFromDiscovery($printerA->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.70',
-            tonerSupplies: [],
-        ));
-
-        $supply = $printerA->fresh()->allTonerSupplies()->first();
-        $this->assertNotNull($supply);
-        $supply->forceFill([
-            'transfer_target_printer_id' => $printerB->id,
-            'transfer_detected_at' => now(),
-        ])->save();
-
-        Http::fake([
-            'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
-        ]);
-
-        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.71',
-            tonerSupplies: [[
-                'slot_key' => '2',
-                'color' => 'magenta',
-                'snmp_description' => 'TK-5240M',
-                'level' => 60,
-                'max_capacity' => 100,
-                'percentage' => 60,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '2',
-                    'description' => 'TK-5240M',
-                ],
-            ]],
-        ));
+                'description' => 'TK-5240C',
+            ],
+        ]]));
 
         Http::assertNothingSent();
     }
@@ -439,6 +164,38 @@ class PrinterAlertsTest extends TestCase
         Http::fake([
             'https://api.telegram.org/*' => Http::response(['ok' => true], 200),
         ]);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $supplies
+     */
+    private function discovery(array $supplies): DiscoveredPrinterData
+    {
+        return new DiscoveredPrinterData(
+            ipAddress: '192.168.1.25',
+            tonerSupplies: $supplies,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function supply(string $slot, string $color, string $description, int $percentage): array
+    {
+        return [
+            'slot_key' => $slot,
+            'color' => $color,
+            'snmp_description' => $description,
+            'level' => $percentage,
+            'max_capacity' => 100,
+            'percentage' => $percentage,
+            'unit' => 'percent',
+            'is_known' => true,
+            'raw_value' => [
+                'slot_key' => $slot,
+                'description' => $description,
+            ],
+        ];
     }
 
     private function makeService(): PrinterPollingService

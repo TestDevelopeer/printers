@@ -58,7 +58,6 @@ class Printer extends Model
     {
         return $this->hasMany(TonerSupply::class)
             ->whereNotNull('removed_at')
-            ->whereNull('transfer_target_printer_id')
             ->orderByDesc('removed_at')
             ->orderBy('color')
             ->orderBy('snmp_description');
@@ -96,27 +95,9 @@ class Printer extends Model
 
     public function getDisplayedTonerSuppliesAttribute(): EloquentCollection
     {
-        $activeSupplies = $this->tonerSupplies()
-            ->where(function ($query): void {
-                $query->whereNull('transfer_target_printer_id')
-                    ->orWhere('transfer_target_printer_id', $this->getKey());
-            })
+        return $this->tonerSupplies()
+            ->orderBy('slot_key')
             ->get();
-
-        $incomingSupplies = TonerSupply::query()
-            ->with(['printer', 'transferTargetPrinter'])
-            ->where('transfer_target_printer_id', $this->getKey())
-            ->where('printer_id', '!=', $this->getKey())
-            ->get();
-
-        return $activeSupplies
-            ->merge($incomingSupplies)
-            ->unique('id')
-            ->sortBy([
-                fn (TonerSupply $supply) => $supply->color?->value ?? 'unknown',
-                fn (TonerSupply $supply) => $supply->snmp_description ?? '',
-            ])
-            ->values();
     }
 
     public function getTonerSummaryAttribute(): string

@@ -17,8 +17,6 @@ class PrinterAlertService
 
     private const SUPPLY_REPLACEMENT_TTL_SECONDS = 3600;
 
-    private const TRANSFER_TTL_SECONDS = 86400;
-
     public function __construct(
         private readonly TelegramBotService $telegramBotService,
     ) {
@@ -26,53 +24,58 @@ class PrinterAlertService
 
     /**
      * @param  array<string, bool>  $previousLowTonerStates
-     * @param  array<string, array{color: string, description: string|null}>  $previousActiveSupplies
+     * @param  array<int, array{slot_key: string, supply: TonerSupply}>  $detectedReplacements
      */
     public function dispatchAlerts(
         Printer $printer,
         ?PrinterStatus $previousStatus,
         array $previousLowTonerStates,
-        array $previousActiveSupplies = [],
+        array $detectedReplacements = [],
     ): void {
+        $replacementSlotKeys = array_map(
+            static fn (array $replacement): string => $replacement['slot_key'],
+            $detectedReplacements,
+        );
+
         $this->notifyPrinterStatusChange($printer, $previousStatus);
-        $this->notifySupplyReplacementChanges($printer, $previousActiveSupplies);
-        $this->notifyLowTonerChanges($printer, $previousLowTonerStates);
-    }
 
-    public function notifyForeignSupplyDetected(Printer $targetPrinter, TonerSupply $supply): void
-    {
-        $sourcePrinter = $supply->printer;
-
-        if (! $sourcePrinter instanceof Printer) {
-            return;
+        foreach ($detectedReplacements as $replacement) {
+            $this->notifyCartridgeReplacementDetected(
+                $printer,
+                $replacement['slot_key'],
+                $replacement['supply'],
+            );
         }
 
-        $this->sendOnce(
-            $this->alertKey('transfer-detected', $targetPrinter->getKey(), $supply->getKey()),
-            self::TRANSFER_TTL_SECONDS,
-            implode("\n", [
-                '⚠️ Обнаружен картридж от другого принтера',
-                "🖨️ Новый принтер: {$targetPrinter->display_name}",
-                "🌐 IP: {$targetPrinter->ip_address}",
-                '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
-                "↩️ Ранее принадлежал: {$sourcePrinter->display_name} ({$sourcePrinter->ip_address})",
-                '📝 Действие: требуется подтверждение переноса',
-            ]),
-        );
+        $this->notifyLowTonerChanges($printer, $previousLowTonerStates, $replacementSlotKeys);
     }
 
-    public function notifyTransferConfirmed(TonerSupply $supply, Printer $previousPrinter, Printer $targetPrinter): void
-    {
+    public function notifyCartridgeReplacementDetected(
+        Printer $printer,
+        string $slotKey,
+        TonerSupply $provisionalSupply,
+    ): void {
         $this->sendOnce(
-            $this->alertKey('transfer-confirmed', $targetPrinter->getKey(), $supply->getKey()),
-            self::TRANSFER_TTL_SECONDS,
-            implode("\n", [
-                '✅ Перенос картриджа подтвержден',
-                "🖨️ Новый принтер: {$targetPrinter->display_name}",
-                "🌐 IP: {$targetPrinter->ip_address}",
-                '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
-                "↪️ Перенесен из: {$previousPrinter->display_name} ({$previousPrinter->ip_address})",
-            ]),
+            $this->alertKey(
+                'cartridge-replacement',
+                $printer->getKey(),
+                $slotKey.'|'.$provisionalSupply->getKey(),
+            ),
+            self::SUPPLY_REPLACEMENT_TTL_SECONDS,
+            implode("\n", array_filter([
+                '🔄 Заменён картридж',
+                "🖨️ Принтер: {$printer->display_name}",
+                "🌐 IP: {$printer->ip_address}",
+                "🧩 Слот: {$slotKey}",
+                '🎨 Картридж: '.$this->formatSupplyLabel(
+                    $provisionalSupply->color_label,
+                    $provisionalSupply->snmp_description,
+                ),
+                $provisionalSupply->percentage !== null
+                    ? "📈 Уровень: {$provisionalSupply->percentage_display}"
+                    : null,
+                '📝 Требуется выбрать картридж в админке',
+            ])),
         );
     }
 
@@ -119,52 +122,19 @@ class PrinterAlertService
     }
 
     /**
-     * @param  array<string, array{color: string, description: string|null}>  $previousActiveSupplies
+     * @param  array<string, bool>  $previousLowTonerStates
+     * @param  array<int, string>  $replacementSlotKeys
      */
-    private function notifySupplyReplacementChanges(Printer $printer, array $previousActiveSupplies): void
-    {
-        $currentSupplies = $printer->tonerSupplies
-            ->filter(fn (TonerSupply $supply): bool => filled($supply->slot_key))
-            ->mapWithKeys(fn (TonerSupply $supply): array => [
-                $supply->slot_key => [
-                    'color' => $supply->color_label,
-                    'description' => $supply->snmp_description,
-                ],
-            ])
-            ->all();
-
-        foreach ($previousActiveSupplies as $slotKey => $previousSupply) {
-            $currentSupply = $currentSupplies[$slotKey] ?? null;
-
-            if ($currentSupply === null || $currentSupply === $previousSupply) {
+    private function notifyLowTonerChanges(
+        Printer $printer,
+        array $previousLowTonerStates,
+        array $replacementSlotKeys = [],
+    ): void {
+        foreach ($printer->tonerSupplies as $supply) {
+            if (in_array($supply->slot_key, $replacementSlotKeys, true)) {
                 continue;
             }
 
-            $this->sendOnce(
-                $this->alertKey(
-                    'supply-replacement',
-                    $printer->getKey(),
-                    sha1($slotKey.'|'.json_encode([$previousSupply, $currentSupply])),
-                ),
-                self::SUPPLY_REPLACEMENT_TTL_SECONDS,
-                implode("\n", [
-                    '🔄 Заменен картридж',
-                    "🖨️ Принтер: {$printer->display_name}",
-                    "🌐 IP: {$printer->ip_address}",
-                    "🧩 Слот: {$slotKey}",
-                    '⬅️ Было: '.$this->formatSupplyLabel($previousSupply['color'], $previousSupply['description']),
-                    '➡️ Стало: '.$this->formatSupplyLabel($currentSupply['color'], $currentSupply['description']),
-                ]),
-            );
-        }
-    }
-
-    /**
-     * @param  array<string, bool>  $previousLowTonerStates
-     */
-    private function notifyLowTonerChanges(Printer $printer, array $previousLowTonerStates): void
-    {
-        foreach ($printer->tonerSupplies as $supply) {
             $currentState = $supply->isLow();
             $previousState = $previousLowTonerStates[$supply->identity_key] ?? null;
 

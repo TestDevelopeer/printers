@@ -15,6 +15,7 @@ class TonerSupply extends Model
     protected $fillable = [
         'printer_id',
         'slot_key',
+        'history_slot_key',
         'supply_signature',
         'color',
         'detected_color',
@@ -31,6 +32,8 @@ class TonerSupply extends Model
         'last_seen_at',
         'comment',
         'is_on_service',
+        'needs_identity_confirmation',
+        'replacement_detected_at',
         'transfer_target_printer_id',
         'transfer_detected_at',
     ];
@@ -47,6 +50,8 @@ class TonerSupply extends Model
             'last_seen_at' => 'datetime',
             'is_on_service' => 'boolean',
             'is_color_manual' => 'boolean',
+            'needs_identity_confirmation' => 'boolean',
+            'replacement_detected_at' => 'datetime',
             'transfer_detected_at' => 'datetime',
         ];
     }
@@ -67,17 +72,9 @@ class TonerSupply extends Model
             && $this->percentage <= config('printers.low_toner_threshold', 15);
     }
 
-    public function needsTransferConfirmation(): bool
+    public function needsIdentityConfirmation(): bool
     {
-        return $this->transfer_target_printer_id !== null
-            && $this->transfer_target_printer_id !== $this->printer_id;
-    }
-
-    public function isPendingForPrinter(?int $printerId): bool
-    {
-        return $printerId !== null
-            && $this->transfer_target_printer_id === $printerId
-            && $this->needsTransferConfirmation();
+        return (bool) $this->needs_identity_confirmation;
     }
 
     public function getStatusLabelAttribute(): string
@@ -119,35 +116,22 @@ class TonerSupply extends Model
         return $this->is_on_service ? 'На обслуживании' : 'В работе';
     }
 
-    public function getTransferWarningAttribute(): ?string
+    public function getDisplayNameAttribute(): string
     {
-        if (! $this->needsTransferConfirmation()) {
-            return null;
+        if (filled($this->snmp_description)) {
+            return $this->snmp_description;
         }
 
-        $printer = $this->relationLoaded('printer') ? $this->printer : $this->printer()->first();
-        $printerName = $printer?->display_name ?? 'другому принтеру';
-        $printerIp = $printer?->ip_address ? " ({$printer->ip_address})" : '';
-
-        return "Ранее принадлежал принтеру {$printerName}{$printerIp}";
+        return 'Картридж #'.$this->getKey();
     }
 
     public function getIdentityKeyAttribute(): string
     {
-        return self::buildSupplySignature(
-            $this->color?->value ?? 'unknown',
-            $this->snmp_description,
+        return sprintf(
+            '%d:%s:%d',
+            $this->printer_id ?? 0,
+            $this->slot_key ?? 'unknown',
+            $this->getKey() ?? 0,
         );
-    }
-
-    public static function buildSupplySignature(?string $color, ?string $description): string
-    {
-        $color = $color ?: 'unknown';
-        $description = mb_strtolower(trim((string) $description));
-        $description = preg_replace('/\s+/u', ' ', $description) ?? '';
-
-        return $description === ''
-            ? $color
-            : "{$color}:{$description}";
     }
 }

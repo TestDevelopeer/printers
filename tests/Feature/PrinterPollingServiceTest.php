@@ -10,6 +10,7 @@ use App\Services\Printers\Data\DiscoveredPrinterData;
 use App\Services\Printers\PrinterAlertService;
 use App\Services\Printers\PrinterPollingService;
 use App\Services\Printers\PrinterSnmpService;
+use App\Services\Printers\TonerSupplyIdentityService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -17,345 +18,215 @@ class PrinterPollingServiceTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_it_moves_removed_supplies_to_history_and_creates_new_installation_on_return(): void
+    public function test_first_poll_creates_one_supply_per_slot(): void
     {
         $printer = $this->makePrinter('192.168.1.25');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            discoveredName: 'Kyocera ECOSYS',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 80,
-                'max_capacity' => 100,
-                'percentage' => 80,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('1', 'cyan', 'TK-5240C', 80),
+            $this->supply('2', 'magenta', 'TK-5240M', 70),
+        ]));
 
         $printer->refresh();
-        $activeSupply = $printer->tonerSupplies()->first();
 
-        $this->assertNotNull($activeSupply);
-        $this->assertSame('TK-5240C', $activeSupply->snmp_description);
-        $this->assertNull($activeSupply->removed_at);
-        $this->assertCount(0, $printer->tonerHistory()->get());
-
-        $activeSupply->update([
-            'color' => 'magenta',
-            'is_color_manual' => true,
-            'comment' => 'Проверен и промаркирован.',
-            'is_on_service' => true,
-        ]);
-
-        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            discoveredName: 'Kyocera ECOSYS',
-            tonerSupplies: [],
-        ));
-
-        $printer->refresh();
-        $historySupply = $printer->tonerHistory()->first();
-
-        $this->assertCount(0, $printer->tonerSupplies()->get());
-        $this->assertNotNull($historySupply);
-        $this->assertSame($activeSupply->id, $historySupply->id);
-        $this->assertNotNull($historySupply->removed_at);
-        $this->assertSame('Проверен и промаркирован.', $historySupply->comment);
-        $this->assertTrue($historySupply->is_on_service);
-        $this->assertSame('magenta', $historySupply->color?->value);
-
-        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.25',
-            discoveredName: 'Kyocera ECOSYS',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 55,
-                'max_capacity' => 100,
-                'percentage' => 55,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
-
-        $printer->refresh();
-        $newSupply = $printer->tonerSupplies()->first();
-        $historySupply = $printer->tonerHistory()->first();
-
-        $this->assertNotNull($newSupply);
-        $this->assertNotNull($historySupply);
-        $this->assertNotSame($activeSupply->id, $newSupply->id);
-        $this->assertSame(55, $newSupply->percentage);
-        $this->assertNull($newSupply->removed_at);
-        $this->assertCount(1, $printer->tonerHistory()->get());
-        $this->assertNull($newSupply->comment);
-        $this->assertFalse($newSupply->is_on_service);
-        $this->assertSame('cyan', $newSupply->color?->value);
-        $this->assertSame('cyan', $newSupply->detected_color?->value);
-        $this->assertSame($activeSupply->id, $historySupply->id);
-
-        return;
-
-        $reactivatedSupply = $printer->tonerSupplies()->first();
-
-        $this->assertNotNull($reactivatedSupply);
-        $this->assertSame($activeSupply->id, $reactivatedSupply->id);
-        $this->assertSame(55, $reactivatedSupply->percentage);
-        $this->assertNull($reactivatedSupply->removed_at);
-        $this->assertCount(0, $printer->tonerHistory()->get());
-        $this->assertSame('Проверен и промаркирован.', $reactivatedSupply->comment);
-        $this->assertFalse($reactivatedSupply->is_on_service);
-        $this->assertSame('magenta', $reactivatedSupply->color?->value);
-        $this->assertSame('cyan', $reactivatedSupply->detected_color?->value);
+        $this->assertCount(2, $printer->tonerSupplies);
+        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertFalse($printer->tonerSupplies->contains(fn (TonerSupply $s) => $s->needs_identity_confirmation));
     }
 
-    public function test_it_reuses_the_same_supply_when_only_slot_changes(): void
+    public function test_toner_increase_creates_provisional_supply_and_moves_old_to_history(): void
     {
         $printer = $this->makePrinter('192.168.1.26');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.26',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'yellow',
-                'snmp_description' => 'TK-5240Y',
-                'level' => 75,
-                'max_capacity' => 100,
-                'percentage' => 75,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240Y',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 15),
+        ]));
 
-        $firstSupply = $printer->fresh()->tonerSupplies()->first();
+        $oldSupply = $printer->fresh()->tonerSupplies()->first();
+        $oldSupply?->update(['comment' => 'Номер 2']);
 
-        $service->syncFromDiscovery($printer->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.26',
-            tonerSupplies: [[
-                'slot_key' => '2',
-                'color' => 'yellow',
-                'snmp_description' => 'TK-5240Y',
-                'level' => 70,
-                'max_capacity' => 100,
-                'percentage' => 70,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '2',
-                    'description' => 'TK-5240Y',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 80),
+        ]));
 
-        $updatedSupply = $printer->fresh()->tonerSupplies()->first();
+        $printer->refresh();
+        $active = $printer->tonerSupplies()->first();
+        $history = $printer->tonerHistory()->first();
 
-        $this->assertNotNull($firstSupply);
-        $this->assertNotNull($updatedSupply);
-        $this->assertSame($firstSupply->id, $updatedSupply->id);
-        $this->assertSame('2', $updatedSupply->slot_key);
-        $this->assertCount(1, TonerSupply::query()->where('supply_signature', $updatedSupply->supply_signature)->get());
+        $this->assertNotNull($active);
+        $this->assertNotNull($history);
+        $this->assertNotSame($oldSupply?->id, $active->id);
+        $this->assertSame($oldSupply?->id, $history->id);
+        $this->assertSame('2', $history->history_slot_key);
+        $this->assertSame('Номер 2', $history->comment);
+        $this->assertTrue($active->needs_identity_confirmation);
+        $this->assertSame(80, $active->percentage);
     }
 
-    public function test_it_creates_separate_active_supplies_for_identical_printers(): void
+    public function test_small_toner_increase_does_not_trigger_replacement(): void
     {
-        $printerA = $this->makePrinter('192.168.1.30', 'Printer A');
-        $printerB = $this->makePrinter('192.168.1.31', 'Printer B');
+        $printer = $this->makePrinter('192.168.1.27');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.30',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 60,
-                'max_capacity' => 100,
-                'percentage' => 60,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('1', 'yellow', 'TK-5240Y', 70),
+        ]));
 
-        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.31',
-            tonerSupplies: [[
-                'slot_key' => '3',
-                'color' => 'black',
-                'snmp_description' => 'TK-5240K',
-                'level' => 58,
-                'max_capacity' => 100,
-                'percentage' => 58,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '3',
-                    'description' => 'TK-5240K',
-                ],
-            ]],
-        ));
+        $supply = $printer->fresh()->tonerSupplies()->first();
 
-        $printerA->refresh();
-        $printerB->refresh();
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('1', 'yellow', 'TK-5240Y', 72),
+        ]));
 
-        $supplyA = $printerA->tonerSupplies()->first();
-        $supplyB = $printerB->tonerSupplies()->first();
+        $printer->refresh();
 
-        $this->assertNotNull($supplyA);
-        $this->assertNotNull($supplyB);
-        $this->assertNotSame($supplyA->id, $supplyB->id);
-        $this->assertSame($supplyA->supply_signature, $supplyB->supply_signature);
-        $this->assertFalse($supplyA->needsTransferConfirmation());
-        $this->assertFalse($supplyB->needsTransferConfirmation());
-        $this->assertCount(1, $printerA->displayed_toner_supplies);
-        $this->assertCount(1, $printerB->displayed_toner_supplies);
-        $this->assertCount(0, $printerA->incomingPendingTonerSupplies()->get());
-        $this->assertCount(0, $printerB->incomingPendingTonerSupplies()->get());
+        $this->assertCount(1, $printer->tonerSupplies);
+        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame($supply?->id, $printer->tonerSupplies()->first()?->id);
+        $this->assertFalse($printer->tonerSupplies()->first()?->needs_identity_confirmation);
     }
 
-    public function test_it_does_not_auto_transfer_historical_supply_to_another_printer(): void
+    public function test_pending_slot_updates_snmp_without_new_replacement(): void
     {
-        $printerA = $this->makePrinter('192.168.1.40', 'Printer A');
-        $printerB = $this->makePrinter('192.168.1.41', 'Printer B');
+        $printer = $this->makePrinter('192.168.1.28');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.40',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 66,
-                'max_capacity' => 100,
-                'percentage' => 66,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('1', 'black', 'TK-5240K', 20),
+        ]));
 
-        $supply = $printerA->fresh()->tonerSupplies()->first();
-        $this->assertNotNull($supply);
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('1', 'black', 'TK-5240K', 85),
+        ]));
 
-        $service->syncFromDiscovery($printerA->fresh(), new DiscoveredPrinterData(
-            ipAddress: '192.168.1.40',
-            tonerSupplies: [],
-        ));
+        $provisional = $printer->fresh()->tonerSupplies()->first();
+        $this->assertTrue($provisional?->needs_identity_confirmation);
 
-        $this->assertCount(1, $printerA->fresh()->tonerHistory()->get());
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('1', 'black', 'TK-5240K', 84),
+        ]));
 
-        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.41',
-            tonerSupplies: [[
-                'slot_key' => '2',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 64,
-                'max_capacity' => 100,
-                'percentage' => 64,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '2',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
+        $provisional->refresh();
 
-        $printerA->refresh();
-        $printerB->refresh();
-        $supplyB = $printerB->tonerSupplies()->first();
-
-        $this->assertNotNull($supplyB);
-        $this->assertSame($printerA->id, $supply->fresh()->printer_id);
-        $this->assertNull($supply->fresh()->transfer_target_printer_id);
-        $this->assertSame($printerB->id, $supplyB->printer_id);
-        $this->assertFalse($supplyB->needsTransferConfirmation());
-        $this->assertCount(1, $printerA->tonerHistory()->get());
-        $this->assertCount(1, $printerB->tonerSupplies()->get());
-
-        return;
+        $this->assertSame(84, $provisional->percentage);
+        $this->assertTrue($provisional->needs_identity_confirmation);
+        $this->assertCount(1, $printer->fresh()->tonerSupplies);
     }
 
-    public function test_it_clears_legacy_pending_transfer_flags_during_sync(): void
+    public function test_missing_slot_moves_active_supply_to_history_with_slot_key(): void
     {
-        $printerA = $this->makePrinter('192.168.1.50', 'Printer A');
-        $printerB = $this->makePrinter('192.168.1.51', 'Printer B');
+        $printer = $this->makePrinter('192.168.1.29');
         $service = $this->makeService();
 
-        $service->syncFromDiscovery($printerA, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.50',
-            tonerSupplies: [[
-                'slot_key' => '1',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 66,
-                'max_capacity' => 100,
-                'percentage' => 66,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '1',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('3', 'yellow', 'TK-5240Y', 55),
+        ]));
 
-        $supply = $printerA->fresh()->tonerSupplies()->first();
-        $this->assertNotNull($supply);
+        $active = $printer->fresh()->tonerSupplies()->first();
 
-        $supply->forceFill([
-            'transfer_target_printer_id' => $printerB->id,
-            'transfer_detected_at' => now(),
-        ])->save();
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([]));
 
-        $service->syncFromDiscovery($printerB, new DiscoveredPrinterData(
-            ipAddress: '192.168.1.51',
-            tonerSupplies: [[
-                'slot_key' => '2',
-                'color' => 'cyan',
-                'snmp_description' => 'TK-5240C',
-                'level' => 64,
-                'max_capacity' => 100,
-                'percentage' => 64,
-                'unit' => 'percent',
-                'is_known' => true,
-                'raw_value' => [
-                    'slot_key' => '2',
-                    'description' => 'TK-5240C',
-                ],
-            ]],
-        ));
+        $history = $printer->fresh()->tonerHistory()->first();
 
-        $this->assertNull($supply->fresh()->transfer_target_printer_id);
-        $this->assertNull($supply->fresh()->transfer_detected_at);
+        $this->assertCount(0, $printer->fresh()->tonerSupplies);
+        $this->assertNotNull($history);
+        $this->assertSame($active?->id, $history->id);
+        $this->assertSame('3', $history->history_slot_key);
+    }
 
-        return;
+    public function test_select_from_history_reactivates_cartridge_and_moves_provisional_to_history(): void
+    {
+        $printer = $this->makePrinter('192.168.1.30');
+        $service = $this->makeService();
+        $identityService = new TonerSupplyIdentityService();
+
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 10),
+        ]));
+
+        $original = $printer->fresh()->tonerSupplies()->first();
+        $original?->update(['comment' => 'Номер 2']);
+
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 90),
+        ]));
+
+        $provisional = $printer->fresh()->tonerSupplies()->first();
+        $history = $printer->fresh()->tonerHistory()->first();
+
+        $identityService->selectFromHistory($printer->fresh(), '2', $history);
+
+        $printer->refresh();
+        $active = $printer->tonerSupplies()->first();
+
+        $this->assertNotNull($active);
+        $this->assertSame($original?->id, $active->id);
+        $this->assertSame('Номер 2', $active->comment);
+        $this->assertSame(90, $active->percentage);
+        $this->assertFalse($active->needs_identity_confirmation);
+        $this->assertTrue($printer->tonerHistory()->whereKey($provisional?->id)->exists());
+    }
+
+    public function test_save_as_new_creates_confirmed_supply(): void
+    {
+        $printer = $this->makePrinter('192.168.1.31');
+        $service = $this->makeService();
+        $identityService = new TonerSupplyIdentityService();
+
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 12),
+        ]));
+
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 88),
+        ]));
+
+        $provisional = $printer->fresh()->tonerSupplies()->first();
+
+        $newSupply = $identityService->saveAsNew($printer->fresh(), '2', 'Картридж 2 слот 2');
+
+        $printer->refresh();
+
+        $this->assertNotSame($provisional?->id, $newSupply->id);
+        $this->assertSame('Картридж 2 слот 2', $newSupply->comment);
+        $this->assertSame(88, $newSupply->percentage);
+        $this->assertFalse($newSupply->needs_identity_confirmation);
+        $this->assertTrue($printer->tonerHistory()->whereKey($provisional?->id)->exists());
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $supplies
+     */
+    private function discovery(array $supplies): DiscoveredPrinterData
+    {
+        return new DiscoveredPrinterData(
+            ipAddress: '192.168.1.25',
+            discoveredName: 'Kyocera ECOSYS',
+            tonerSupplies: $supplies,
+        );
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function supply(string $slot, string $color, string $description, int $percentage): array
+    {
+        return [
+            'slot_key' => $slot,
+            'color' => $color,
+            'snmp_description' => $description,
+            'level' => $percentage,
+            'max_capacity' => 100,
+            'percentage' => $percentage,
+            'unit' => 'percent',
+            'is_known' => true,
+            'raw_value' => [
+                'slot_key' => $slot,
+                'description' => $description,
+            ],
+        ];
     }
 
     private function makeService(): PrinterPollingService
