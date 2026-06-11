@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Services\Printers\Data\DiscoveredPrinterData;
 use App\Services\Printers\NetworkScannerService;
 use App\Services\Printers\PrinterPollingService;
 use App\Services\Printers\PrinterSnmpService;
@@ -84,5 +85,27 @@ class NetworkScannerServiceTest extends TestCase
         $service->assertCanRunSynchronously('192.168.1.0/24', 1000);
 
         $this->assertTrue(true);
+    }
+
+    public function test_scan_hosts_uses_snmp_discover_without_ping_gate(): void
+    {
+        $snmpService = $this->createMock(PrinterSnmpService::class);
+        $snmpService->expects($this->once())
+            ->method('discover')
+            ->with('192.168.1.90', 'public', 1000)
+            ->willReturn(new DiscoveredPrinterData(
+                ipAddress: '192.168.1.90',
+                discoveredName: 'Kyocera ECOSYS',
+            ));
+
+        $service = new NetworkScannerService(
+            $snmpService,
+            $this->createMock(PrinterPollingService::class),
+        );
+
+        $results = $service->scanHosts(['192.168.1.90'], 'public', 1000);
+
+        $this->assertCount(1, $results);
+        $this->assertSame('192.168.1.90', $results[0]->ipAddress);
     }
 }

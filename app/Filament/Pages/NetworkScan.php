@@ -60,6 +60,8 @@ class NetworkScan extends Page
                 ])
                 ->action(function (array $data, NetworkScannerService $networkScannerService): void {
                     try {
+                        set_time_limit(max(120, (int) config('printers.scan_max_sync_seconds', 90) + 30));
+
                         $networkScannerService->assertCanRunSynchronously(
                             $data['cidr'],
                             (int) $data['timeout'],

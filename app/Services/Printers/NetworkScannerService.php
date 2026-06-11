@@ -4,8 +4,11 @@ namespace App\Services\Printers;
 
 use App\Models\Printer;
 use App\Services\Printers\Data\DiscoveredPrinterData;
+use Illuminate\Support\Facades\Artisan;
 use InvalidArgumentException;
+use JsonException;
 use RuntimeException;
+use Symfony\Component\Process\PhpExecutableFinder;
 use Symfony\Component\Process\Process;
 
 class NetworkScannerService
@@ -26,8 +29,8 @@ class NetworkScannerService
 
         $hosts = $this->hostsFromCidr($cidr);
 
-        if (count($hosts) <= 4 || ! function_exists('pcntl_fork')) {
-            return $this->scanChunk($hosts, $community, $timeoutMs);
+        if (count($hosts) <= 1) {
+            return $this->scanHosts($hosts, $community, $timeoutMs);
         }
 
         return $this->scanInParallel($hosts, $community, $timeoutMs);
@@ -63,6 +66,25 @@ class NetworkScannerService
             fn (DiscoveredPrinterData $discovered): Printer => $this->printerPollingService->upsertDiscoveredPrinter($discovered),
             $discoveredPrinters,
         );
+    }
+
+    /**
+     * @param  array<int, string>  $hosts
+     * @return array<int, DiscoveredPrinterData>
+     */
+    public function scanHosts(array $hosts, string $community, int $timeoutMs): array
+    {
+        $results = [];
+
+        foreach ($hosts as $ipAddress) {
+            $discovered = $this->printerSnmpService->discover($ipAddress, $community, $timeoutMs);
+
+            if ($discovered !== null) {
+                $results[] = $discovered;
+            }
+        }
+
+        return $results;
     }
 
     /**
@@ -128,118 +150,119 @@ class NetworkScannerService
      * @param  array<int, string>  $hosts
      * @return array<int, DiscoveredPrinterData>
      */
-    private function scanChunk(array $hosts, string $community, int $timeoutMs): array
-    {
-        $results = [];
-
-        foreach ($hosts as $ipAddress) {
-            $probe = $this->printerSnmpService->probe($ipAddress, $community, $timeoutMs);
-
-            if ($probe === null && ! $this->isHostReachable($ipAddress, $timeoutMs)) {
-                continue;
-            }
-
-            $probe ??= $this->printerSnmpService->probe($ipAddress, $community, $timeoutMs);
-
-            if ($probe === null) {
-                continue;
-            }
-
-            $discovered = $this->printerSnmpService->discover($ipAddress, $community, $timeoutMs, $probe);
-
-            if ($discovered !== null) {
-                $results[] = $discovered;
-            }
-        }
-
-        return $results;
-    }
-
-    /**
-     * @param  array<int, string>  $hosts
-     * @return array<int, DiscoveredPrinterData>
-     */
     private function scanInParallel(array $hosts, string $community, int $timeoutMs): array
     {
         $workerCount = max(1, min((int) config('printers.scan_concurrency', 16), count($hosts)));
         $chunks = array_chunk($hosts, (int) ceil(count($hosts) / $workerCount));
-        $tempFiles = [];
-        $children = [];
 
-        foreach ($chunks as $index => $chunk) {
-            $tempFile = tempnam(sys_get_temp_dir(), 'printer-scan-');
-
-            if ($tempFile === false) {
-                throw new RuntimeException('Не удалось создать временный файл для результатов сканирования.');
-            }
-
-            $tempFiles[$index] = $tempFile;
-            $pid = pcntl_fork();
-
-            if ($pid === -1) {
-                throw new RuntimeException('Не удалось создать дочерний процесс сканирования.');
-            }
-
-            if ($pid === 0) {
-                try {
-                    $serialized = array_map(
-                        static fn (DiscoveredPrinterData $printer): array => $printer->toArray(),
-                        $this->scanChunk($chunk, $community, $timeoutMs),
-                    );
-
-                    file_put_contents($tempFile, json_encode($serialized, JSON_THROW_ON_ERROR));
-                    exit(0);
-                } catch (\Throwable) {
-                    exit(1);
-                }
-            }
-
-            $children[$pid] = $tempFile;
+        if ($this->shouldScanChunksInProcessPool()) {
+            return $this->scanChunksWithProcessPool($chunks, $community, $timeoutMs);
         }
 
         $results = [];
 
-        foreach ($children as $pid => $tempFile) {
-            pcntl_waitpid($pid, $status);
+        foreach ($chunks as $chunk) {
+            $results = array_merge(
+                $results,
+                $this->scanHosts($chunk, $community, $timeoutMs),
+            );
+        }
 
-            if (pcntl_wexitstatus($status) !== 0) {
-                @unlink($tempFile);
-                continue;
+        return $results;
+    }
+
+    /**
+     * @param  array<int, array<int, string>>  $chunks
+     * @return array<int, DiscoveredPrinterData>
+     */
+    private function scanChunksWithProcessPool(array $chunks, string $community, int $timeoutMs): array
+    {
+        $phpBinary = (new PhpExecutableFinder())->find(false) ?: 'php';
+        $artisan = base_path('artisan');
+        $maxWorkers = max(1, min((int) config('printers.scan_concurrency', 16), count($chunks)));
+        $running = [];
+        $results = [];
+        $chunkIndex = 0;
+        $chunkTimeoutSeconds = $this->chunkProcessTimeoutSeconds($chunks, $timeoutMs);
+
+        while ($chunkIndex < count($chunks) || $running !== []) {
+            while (count($running) < $maxWorkers && $chunkIndex < count($chunks)) {
+                $payload = json_encode([
+                    'hosts' => $chunks[$chunkIndex],
+                    'community' => $community,
+                    'timeout' => $timeoutMs,
+                ], JSON_THROW_ON_ERROR);
+
+                $process = new Process([$phpBinary, $artisan, 'printers:scan-chunk'], base_path(), null, $payload);
+                $process->setTimeout($chunkTimeoutSeconds);
+                $process->start();
+
+                $running[] = $process;
+                $chunkIndex++;
             }
 
-            $content = file_get_contents($tempFile);
-            @unlink($tempFile);
+            foreach ($running as $index => $process) {
+                if ($process->isRunning()) {
+                    continue;
+                }
 
-            if ($content === false || $content === '') {
-                continue;
+                if ($process->isSuccessful()) {
+                    $results = array_merge($results, $this->decodeChunkProcessOutput($process->getOutput()));
+                }
+
+                unset($running[$index]);
             }
 
-            /** @var array<int, array<string, mixed>> $decoded */
-            $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
-
-            foreach ($decoded as $row) {
-                $results[] = DiscoveredPrinterData::fromArray($row);
+            if ($running !== []) {
+                usleep(50_000);
             }
         }
 
         return $results;
     }
 
-    private function isHostReachable(string $ipAddress, int $timeoutMs): bool
+    /**
+     * @param  array<int, array<int, string>>  $chunks
+     */
+    private function chunkProcessTimeoutSeconds(array $chunks, int $timeoutMs): int
     {
-        $process = new Process($this->pingCommand($ipAddress, $timeoutMs));
-        $process->run();
+        $largestChunk = max(array_map('count', $chunks));
 
-        return $process->isSuccessful();
+        return max(30, (int) ceil($largestChunk * ($timeoutMs / 1000 + 1)) + 10);
     }
 
     /**
-     * @return array<int, string>
+     * @return array<int, DiscoveredPrinterData>
      */
-    private function pingCommand(string $ipAddress, int $timeoutMs): array
+    private function decodeChunkProcessOutput(string $output): array
     {
-        return PHP_OS_FAMILY === 'Windows'
-            ? ['ping', '-n', '1', '-w', (string) $timeoutMs, $ipAddress]
-            : ['ping', '-c', '1', '-W', (string) max(1, (int) ceil($timeoutMs / 1000)), $ipAddress];
+        $output = trim($output);
+
+        if ($output === '') {
+            return [];
+        }
+
+        try {
+            /** @var array<int, array<string, mixed>> $decoded */
+            $decoded = json_decode($output, true, flags: JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new RuntimeException('Не удалось разобрать результаты дочернего сканирования: '.$exception->getMessage(), 0, $exception);
+        }
+
+        return array_map(
+            static fn (array $row): DiscoveredPrinterData => DiscoveredPrinterData::fromArray($row),
+            $decoded,
+        );
+    }
+
+    private function shouldScanChunksInProcessPool(): bool
+    {
+        if (app()->runningUnitTests()) {
+            return false;
+        }
+
+        return class_exists(Process::class)
+            && is_file(base_path('artisan'))
+            && Artisan::has('printers:scan-chunk');
     }
 }
