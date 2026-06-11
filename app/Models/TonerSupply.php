@@ -68,6 +68,11 @@ class TonerSupply extends Model
         return $this->belongsTo(Printer::class, 'transfer_target_printer_id');
     }
 
+    public function scopeInHistory(Builder $query): Builder
+    {
+        return $query->whereNotNull('removed_at');
+    }
+
     public function scopeOrderByInstallationSlot(Builder $query, bool $preferHistorySlot = false): Builder
     {
         $slotExpression = $preferHistorySlot ? 'COALESCE(history_slot_key, slot_key)' : 'slot_key';
@@ -172,6 +177,11 @@ class TonerSupply extends Model
         }
 
         return 'Картридж #'.$this->getKey();
+    }
+
+    public function getDisplaySlotAttribute(): string
+    {
+        return $this->history_slot_key ?? $this->slot_key ?? '—';
     }
 
     public function getIdentityKeyAttribute(): string
