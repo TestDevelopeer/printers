@@ -366,17 +366,33 @@ class PrinterPollingService
      */
     private function isReplacementDetected(TonerSupply $activeSupply, array $normalized): bool
     {
-        if (! $activeSupply->is_known || $activeSupply->percentage === null) {
-            return false;
+        $activeWasKnown = $this->isKnownSupplyState($activeSupply->is_known, $activeSupply->percentage);
+        $normalizedIsUnknown = $this->isUnknownSupplyState(
+            (bool) $normalized['is_known'],
+            $normalized['percentage'],
+        );
+
+        if ($activeWasKnown && $normalizedIsUnknown) {
+            return true;
         }
 
-        if (! $normalized['is_known'] || $normalized['percentage'] === null) {
+        if (! $activeWasKnown || $normalizedIsUnknown) {
             return false;
         }
 
         $minIncrease = (int) config('printers.replacement_detection_min_increase', 3);
 
         return ((int) $normalized['percentage'] - (int) $activeSupply->percentage) >= $minIncrease;
+    }
+
+    private function isKnownSupplyState(bool $isKnown, ?int $percentage): bool
+    {
+        return $isKnown && $percentage !== null;
+    }
+
+    private function isUnknownSupplyState(bool $isKnown, mixed $percentage): bool
+    {
+        return ! $isKnown || $percentage === null;
     }
 
     /**
