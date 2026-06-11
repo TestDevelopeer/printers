@@ -26,7 +26,9 @@ class PrinterInfolist
         return $schema
             ->components([
                 Section::make('Фоновый опрос')
+                    ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->visible(fn (Printer $record): bool => (bool) $record->is_polling)
+                    ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->schema([
                         TextEntry::make('manual_poll_requested_at')
                             ->label('Состояние')
@@ -44,6 +46,7 @@ class PrinterInfolist
                             ->color('warning'),
                     ]),
                 Section::make('Тонеры')
+                    ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->schema([
                         RepeatableEntry::make('displayed_toner_supplies')
                             ->label('')
@@ -92,6 +95,7 @@ class PrinterInfolist
                     ->collapsible()
                     ->collapsed(false),
                 Section::make('История картриджей')
+                    ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->schema([
                         RepeatableEntry::make('tonerHistory')
                             ->label('')

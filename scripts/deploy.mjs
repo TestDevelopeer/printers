@@ -157,8 +157,16 @@ for entry in "$TMP_DIR"/*; do
       continue
       ;;
   esac
-  rm -rf "$REMOTE_DIR/$name"
-  cp -a "$entry" "$REMOTE_DIR/$name"
+  target="$REMOTE_DIR/$name"
+
+  if [ -d "$entry" ]; then
+    mkdir -p "$target"
+    find "$target" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    cp -a "$entry"/. "$target"/
+  else
+    rm -f "$target"
+    cp -a "$entry" "$target"
+  fi
 done
 
 cd "$REMOTE_DIR"
@@ -166,7 +174,7 @@ docker compose --env-file .env.server -f docker-compose.prod.yml up -d --remove-
 docker compose --env-file .env.server -f docker-compose.prod.yml exec -T app php artisan migrate --force
 docker compose --env-file .env.server -f docker-compose.prod.yml exec -T app php artisan optimize:clear
 docker compose --env-file .env.server -f docker-compose.prod.yml ps
-curl -fsS http://127.0.0.1:1265 >/dev/null
+curl -fsS http://127.0.0.1:1265/admin/login >/dev/null
 `;
 
   run("ssh", [

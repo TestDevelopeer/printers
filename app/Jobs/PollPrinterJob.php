@@ -5,19 +5,37 @@ namespace App\Jobs;
 use App\Models\Printer;
 use App\Models\PrinterPollLog;
 use App\Services\Printers\PrinterPollingService;
+use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Carbon;
 use Throwable;
 
-class PollPrinterJob implements ShouldQueue
+class PollPrinterJob implements ShouldQueue, ShouldBeUnique
 {
     use Queueable;
+
+    public int $uniqueFor = 300;
 
     public function __construct(
         public int $printerId,
         public string $source = 'scheduled',
     ) {
+    }
+
+    public function uniqueId(): string
+    {
+        return (string) $this->printerId;
+    }
+
+    public function middleware(): array
+    {
+        return [
+            (new WithoutOverlapping("printer-poll:{$this->printerId}"))
+                ->expireAfter($this->uniqueFor)
+                ->dontRelease(),
+        ];
     }
 
     public function handle(PrinterPollingService $printerPollingService): void
@@ -29,6 +47,8 @@ class PollPrinterJob implements ShouldQueue
         }
 
         $startedAt = Carbon::now();
+        $this->closeDanglingLogs($printer, $startedAt);
+
         $log = PrinterPollLog::query()->create([
             'printer_id' => $printer->id,
             'source' => $this->source,
@@ -64,10 +84,12 @@ class PollPrinterJob implements ShouldQueue
 
             throw $exception;
         } finally {
-            $printer->forceFill([
-                'is_polling' => false,
-                'manual_poll_requested_at' => null,
-            ])->saveQuietly();
+            Printer::query()
+                ->whereKey($this->printerId)
+                ->update([
+                    'is_polling' => false,
+                    'manual_poll_requested_at' => null,
+                ]);
         }
     }
 
@@ -78,5 +100,27 @@ class PollPrinterJob implements ShouldQueue
             'offline' => 'offline',
             default => 'error',
         };
+    }
+
+    private function closeDanglingLogs(Printer $printer, Carbon $finishedAt): void
+    {
+        $runningLogs = PrinterPollLog::query()
+            ->where('printer_id', $printer->getKey())
+            ->where('status', 'running')
+            ->get();
+
+        foreach ($runningLogs as $runningLog) {
+            $durationMs = $runningLog->started_at instanceof Carbon
+                ? $runningLog->started_at->diffInMilliseconds($finishedAt)
+                : null;
+
+            $runningLog->forceFill([
+                'status' => 'error',
+                'printer_status' => $printer->status?->value,
+                'message' => 'Previous poll did not finish cleanly.',
+                'finished_at' => $finishedAt,
+                'duration_ms' => $durationMs,
+            ])->save();
+        }
     }
 }

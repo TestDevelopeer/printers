@@ -12,6 +12,7 @@ class PrinterPollLogsTable
     public static function configure(Table $table): Table
     {
         return $table
+            ->poll('5s')
             ->defaultSort('started_at', 'desc')
             ->columns([
                 TextColumn::make('started_at')

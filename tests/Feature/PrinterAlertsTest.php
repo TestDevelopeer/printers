@@ -10,6 +10,7 @@ use App\Services\Printers\PrinterAlertService;
 use App\Services\Printers\PrinterPollingService;
 use App\Services\Printers\PrinterSnmpService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Tests\TestCase;
@@ -17,6 +18,13 @@ use Tests\TestCase;
 class PrinterAlertsTest extends TestCase
 {
     use RefreshDatabase;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Cache::flush();
+    }
 
     public function test_it_sends_telegram_notifications_only_when_low_toner_state_changes(): void
     {
@@ -82,6 +90,37 @@ class PrinterAlertsTest extends TestCase
         Http::assertSentCount(2);
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Низкий уровень тонера'));
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Тонер восстановился'));
+    }
+
+    public function test_it_deduplicates_repeated_low_toner_notifications_for_same_supply(): void
+    {
+        $this->fakeTelegram();
+
+        $printer = $this->makePrinter('192.168.1.26');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printer, new DiscoveredPrinterData(
+            ipAddress: '192.168.1.26',
+            tonerSupplies: [[
+                'slot_key' => '1',
+                'color' => 'black',
+                'snmp_description' => 'TK-5240K',
+                'level' => 9,
+                'max_capacity' => 100,
+                'percentage' => 9,
+                'unit' => 'percent',
+                'is_known' => true,
+                'raw_value' => [
+                    'slot_key' => '1',
+                    'description' => 'TK-5240K',
+                ],
+            ]],
+        ));
+
+        $printer = $printer->fresh(['tonerSupplies']);
+        app(PrinterAlertService::class)->dispatchAlerts($printer, $printer->status, []);
+
+        Http::assertSentCount(1);
     }
 
     public function test_it_notifies_when_printer_goes_offline_and_does_not_repeat_same_status(): void

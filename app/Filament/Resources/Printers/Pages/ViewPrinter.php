@@ -13,6 +13,13 @@ class ViewPrinter extends ViewRecord
 {
     protected static string $resource = PrinterResource::class;
 
+    public function hydrate(): void
+    {
+        if ($this->record?->exists) {
+            $this->record->refresh();
+        }
+    }
+
     protected function getHeaderActions(): array
     {
         return [

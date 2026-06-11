@@ -6,9 +6,19 @@ use App\Enums\PrinterStatus;
 use App\Models\Printer;
 use App\Models\TonerSupply;
 use App\Services\Notifications\TelegramBotService;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 
 class PrinterAlertService
 {
+    private const LOW_TONER_TTL_SECONDS = 604800;
+
+    private const PRINTER_STATUS_TTL_SECONDS = 86400;
+
+    private const SUPPLY_REPLACEMENT_TTL_SECONDS = 3600;
+
+    private const TRANSFER_TTL_SECONDS = 86400;
+
     public function __construct(
         private readonly TelegramBotService $telegramBotService,
     ) {
@@ -37,25 +47,33 @@ class PrinterAlertService
             return;
         }
 
-        $this->telegramBotService->sendMessage(implode("\n", [
-            '⚠️ Обнаружен картридж от другого принтера',
-            "🖨️ Новый принтер: {$targetPrinter->display_name}",
-            "🌐 IP: {$targetPrinter->ip_address}",
-            '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
-            "↩️ Ранее принадлежал: {$sourcePrinter->display_name} ({$sourcePrinter->ip_address})",
-            '📝 Действие: требуется подтверждение переноса',
-        ]));
+        $this->sendOnce(
+            $this->alertKey('transfer-detected', $targetPrinter->getKey(), $supply->getKey()),
+            self::TRANSFER_TTL_SECONDS,
+            implode("\n", [
+                '⚠️ Обнаружен картридж от другого принтера',
+                "🖨️ Новый принтер: {$targetPrinter->display_name}",
+                "🌐 IP: {$targetPrinter->ip_address}",
+                '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
+                "↩️ Ранее принадлежал: {$sourcePrinter->display_name} ({$sourcePrinter->ip_address})",
+                '📝 Действие: требуется подтверждение переноса',
+            ]),
+        );
     }
 
     public function notifyTransferConfirmed(TonerSupply $supply, Printer $previousPrinter, Printer $targetPrinter): void
     {
-        $this->telegramBotService->sendMessage(implode("\n", [
-            '✅ Перенос картриджа подтвержден',
-            "🖨️ Новый принтер: {$targetPrinter->display_name}",
-            "🌐 IP: {$targetPrinter->ip_address}",
-            '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
-            "↪️ Перенесен из: {$previousPrinter->display_name} ({$previousPrinter->ip_address})",
-        ]));
+        $this->sendOnce(
+            $this->alertKey('transfer-confirmed', $targetPrinter->getKey(), $supply->getKey()),
+            self::TRANSFER_TTL_SECONDS,
+            implode("\n", [
+                '✅ Перенос картриджа подтвержден',
+                "🖨️ Новый принтер: {$targetPrinter->display_name}",
+                "🌐 IP: {$targetPrinter->ip_address}",
+                '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
+                "↪️ Перенесен из: {$previousPrinter->display_name} ({$previousPrinter->ip_address})",
+            ]),
+        );
     }
 
     private function notifyPrinterStatusChange(Printer $printer, ?PrinterStatus $previousStatus): void
@@ -67,12 +85,17 @@ class PrinterAlertService
         }
 
         if (in_array($currentStatus, [PrinterStatus::Offline, PrinterStatus::Error], true)) {
-            $this->telegramBotService->sendMessage(implode("\n", [
-                $currentStatus === PrinterStatus::Error ? '🚨 Изменение статуса принтера' : '📴 Изменение статуса принтера',
-                "🖨️ Принтер: {$printer->display_name}",
-                "🌐 IP: {$printer->ip_address}",
-                "📍 Новый статус: {$currentStatus->label()}",
-            ]));
+            $this->forgetAlertKeys($this->printerStatusKeys($printer, $currentStatus->value));
+            $this->sendOnce(
+                $this->alertKey('printer-status', $printer->getKey(), $currentStatus->value),
+                self::PRINTER_STATUS_TTL_SECONDS,
+                implode("\n", [
+                    $currentStatus === PrinterStatus::Error ? '🚨 Изменение статуса принтера' : '📴 Изменение статуса принтера',
+                    "🖨️ Принтер: {$printer->display_name}",
+                    "🌐 IP: {$printer->ip_address}",
+                    "📍 Новый статус: {$currentStatus->label()}",
+                ]),
+            );
 
             return;
         }
@@ -81,12 +104,17 @@ class PrinterAlertService
             $currentStatus === PrinterStatus::Online
             && in_array($previousStatus, [PrinterStatus::Offline, PrinterStatus::Error], true)
         ) {
-            $this->telegramBotService->sendMessage(implode("\n", [
-                '✅ Принтер снова в сети',
-                "🖨️ Принтер: {$printer->display_name}",
-                "🌐 IP: {$printer->ip_address}",
-                "📍 Новый статус: {$currentStatus->label()}",
-            ]));
+            $this->forgetAlertKeys($this->printerStatusKeys($printer, $currentStatus->value));
+            $this->sendOnce(
+                $this->alertKey('printer-status', $printer->getKey(), $currentStatus->value),
+                self::PRINTER_STATUS_TTL_SECONDS,
+                implode("\n", [
+                    '✅ Принтер снова в сети',
+                    "🖨️ Принтер: {$printer->display_name}",
+                    "🌐 IP: {$printer->ip_address}",
+                    "📍 Новый статус: {$currentStatus->label()}",
+                ]),
+            );
         }
     }
 
@@ -112,14 +140,22 @@ class PrinterAlertService
                 continue;
             }
 
-            $this->telegramBotService->sendMessage(implode("\n", [
-                '🔄 Заменен картридж',
-                "🖨️ Принтер: {$printer->display_name}",
-                "🌐 IP: {$printer->ip_address}",
-                "🧩 Слот: {$slotKey}",
-                '⬅️ Было: '.$this->formatSupplyLabel($previousSupply['color'], $previousSupply['description']),
-                '➡️ Стало: '.$this->formatSupplyLabel($currentSupply['color'], $currentSupply['description']),
-            ]));
+            $this->sendOnce(
+                $this->alertKey(
+                    'supply-replacement',
+                    $printer->getKey(),
+                    sha1($slotKey.'|'.json_encode([$previousSupply, $currentSupply])),
+                ),
+                self::SUPPLY_REPLACEMENT_TTL_SECONDS,
+                implode("\n", [
+                    '🔄 Заменен картридж',
+                    "🖨️ Принтер: {$printer->display_name}",
+                    "🌐 IP: {$printer->ip_address}",
+                    "🧩 Слот: {$slotKey}",
+                    '⬅️ Было: '.$this->formatSupplyLabel($previousSupply['color'], $previousSupply['description']),
+                    '➡️ Стало: '.$this->formatSupplyLabel($currentSupply['color'], $currentSupply['description']),
+                ]),
+            );
         }
     }
 
@@ -137,15 +173,66 @@ class PrinterAlertService
             }
 
             if ($currentState) {
-                $this->telegramBotService->sendMessage($this->formatLowTonerMessage($printer, $supply));
+                Cache::forget($this->alertKey('toner-recovered', $printer->getKey(), $supply->identity_key));
+                $this->sendOnce(
+                    $this->alertKey('low-toner', $printer->getKey(), $supply->identity_key),
+                    self::LOW_TONER_TTL_SECONDS,
+                    $this->formatLowTonerMessage($printer, $supply),
+                );
 
                 continue;
             }
 
             if ($previousState === true) {
-                $this->telegramBotService->sendMessage($this->formatRecoveredTonerMessage($printer, $supply));
+                Cache::forget($this->alertKey('low-toner', $printer->getKey(), $supply->identity_key));
+                $this->sendOnce(
+                    $this->alertKey('toner-recovered', $printer->getKey(), $supply->identity_key),
+                    self::LOW_TONER_TTL_SECONDS,
+                    $this->formatRecoveredTonerMessage($printer, $supply),
+                );
             }
         }
+    }
+
+    private function sendOnce(string $key, int $ttlSeconds, string $message): void
+    {
+        if (! Cache::add($key, true, now()->addSeconds($ttlSeconds))) {
+            return;
+        }
+
+        $this->telegramBotService->sendMessage($message);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function printerStatusKeys(Printer $printer, string $currentStatus): array
+    {
+        return Collection::make(['online', 'offline', 'error'])
+            ->reject(fn (string $status): bool => $status === $currentStatus)
+            ->map(fn (string $status): string => $this->alertKey('printer-status', $printer->getKey(), $status))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, string>  $keys
+     */
+    private function forgetAlertKeys(array $keys): void
+    {
+        foreach ($keys as $key) {
+            Cache::forget($key);
+        }
+    }
+
+    private function alertKey(string $type, int|string|null $printerId, int|string|null $subject): string
+    {
+        return sprintf(
+            'printers:telegram:%s:%s:%s',
+            $type,
+            $printerId ?? 'unknown',
+            sha1((string) ($subject ?? 'unknown')),
+        );
     }
 
     private function formatLowTonerMessage(Printer $printer, TonerSupply $supply): string
