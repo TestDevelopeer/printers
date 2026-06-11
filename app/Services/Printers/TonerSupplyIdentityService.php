@@ -82,29 +82,15 @@ class TonerSupplyIdentityService
                 throw new InvalidArgumentException('В слоте нет картриджа, ожидающего подтверждения.');
             }
 
-            $this->moveSupplyToHistory($provisional, $slotKey);
+            $provisional->forceFill([
+                'needs_identity_confirmation' => false,
+                'replacement_detected_at' => null,
+                'comment' => trim($comment),
+                'is_on_service' => false,
+                'last_seen_at' => Carbon::now(),
+            ])->save();
 
-            $supply = new TonerSupply([
-                'printer_id' => $printer->getKey(),
-            ]);
-
-            $supply->forceFill(array_merge(
-                $this->snmpPayloadFrom($provisional),
-                [
-                    'slot_key' => $slotKey,
-                    'removed_at' => null,
-                    'history_slot_key' => null,
-                    'needs_identity_confirmation' => false,
-                    'replacement_detected_at' => null,
-                    'installed_at' => Carbon::now(),
-                    'last_seen_at' => Carbon::now(),
-                    'is_on_service' => false,
-                    'comment' => trim($comment),
-                    'color' => $provisional->color ?? $provisional->detected_color,
-                ],
-            ))->save();
-
-            return $supply->fresh();
+            return $provisional->fresh();
         });
     }
 

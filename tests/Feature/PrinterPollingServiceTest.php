@@ -169,7 +169,7 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertTrue($printer->tonerHistory()->whereKey($provisional?->id)->exists());
     }
 
-    public function test_save_as_new_creates_confirmed_supply(): void
+    public function test_save_as_new_confirms_provisional_supply_in_place(): void
     {
         $printer = $this->makePrinter('192.168.1.31');
         $service = $this->makeService();
@@ -185,15 +185,16 @@ class PrinterPollingServiceTest extends TestCase
 
         $provisional = $printer->fresh()->tonerSupplies()->first();
 
-        $newSupply = $identityService->saveAsNew($printer->fresh(), '2', 'Картридж 2 слот 2');
+        $confirmedSupply = $identityService->saveAsNew($printer->fresh(), '2', 'Картридж 2 слот 2');
 
         $printer->refresh();
 
-        $this->assertNotSame($provisional?->id, $newSupply->id);
-        $this->assertSame('Картридж 2 слот 2', $newSupply->comment);
-        $this->assertSame(88, $newSupply->percentage);
-        $this->assertFalse($newSupply->needs_identity_confirmation);
-        $this->assertTrue($printer->tonerHistory()->whereKey($provisional?->id)->exists());
+        $this->assertSame($provisional?->id, $confirmedSupply->id);
+        $this->assertSame('Картридж 2 слот 2', $confirmedSupply->comment);
+        $this->assertSame(88, $confirmedSupply->percentage);
+        $this->assertFalse($confirmedSupply->needs_identity_confirmation);
+        $this->assertFalse($printer->tonerHistory()->whereKey($provisional?->id)->exists());
+        $this->assertCount(1, $printer->tonerSupplies);
     }
 
     public function test_delete_from_history_removes_supply_record(): void
