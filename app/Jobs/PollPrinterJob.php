@@ -6,18 +6,17 @@ use App\Models\Printer;
 use App\Models\PrinterPollLog;
 use App\Services\Printers\Data\PrinterPollResult;
 use App\Services\Printers\PrinterPollingService;
-use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Support\Carbon;
 use Throwable;
 
-class PollPrinterJob implements ShouldQueue, ShouldBeUnique
+class PollPrinterJob implements ShouldQueue
 {
     use Queueable;
 
-    public int $uniqueFor = 300;
+    private const OVERLAP_SECONDS = 300;
 
     public function __construct(
         public int $printerId,
@@ -25,17 +24,12 @@ class PollPrinterJob implements ShouldQueue, ShouldBeUnique
     ) {
     }
 
-    public function uniqueId(): string
-    {
-        return (string) $this->printerId;
-    }
-
     public function middleware(): array
     {
         return [
             (new WithoutOverlapping("printer-poll:{$this->printerId}"))
-                ->expireAfter($this->uniqueFor)
-                ->dontRelease(),
+                ->expireAfter(self::OVERLAP_SECONDS)
+                ->releaseAfter(30),
         ];
     }
 
@@ -87,6 +81,16 @@ class PollPrinterJob implements ShouldQueue, ShouldBeUnique
                     'manual_poll_requested_at' => null,
                 ]);
         }
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        Printer::query()
+            ->whereKey($this->printerId)
+            ->update([
+                'is_polling' => false,
+                'manual_poll_requested_at' => null,
+            ]);
     }
 
     private function fillLogFromResult(

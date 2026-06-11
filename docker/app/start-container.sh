@@ -21,7 +21,7 @@ case "$MODE" in
     exec php-fpm
     ;;
   worker)
-    exec php artisan queue:work --queue=default --sleep=3 --tries=3 --timeout=120 --ansi
+    exec php artisan queue:work --queue=default --sleep=3 --tries=3 --timeout=180 --max-time=3600 --ansi
     ;;
   scheduler)
     while true; do

@@ -8,6 +8,7 @@ use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Throwable;
 
 class ViewPrinter extends ViewRecord
 {
@@ -34,15 +35,23 @@ class ViewPrinter extends ViewRecord
                         'manual_poll_requested_at' => now(),
                     ])->save();
 
-                    PollPrinterJob::dispatch($this->record->id, 'manual');
+                    try {
+                        PollPrinterJob::dispatchSync($this->record->id, 'manual');
+
+                        Notification::make()
+                            ->title('Опрос выполнен')
+                            ->body("Принтер {$this->record->display_name} опрошен, запись добавлена в логи.")
+                            ->success()
+                            ->send();
+                    } catch (Throwable $exception) {
+                        Notification::make()
+                            ->title('Ошибка опроса')
+                            ->body($exception->getMessage())
+                            ->danger()
+                            ->send();
+                    }
 
                     $this->record->refresh();
-
-                    Notification::make()
-                        ->title('Опрос поставлен в очередь')
-                        ->body("Принтер {$this->record->display_name} опрашивается в фоне.")
-                        ->success()
-                        ->send();
                 }),
             EditAction::make(),
         ];

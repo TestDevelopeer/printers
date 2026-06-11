@@ -17,6 +17,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Throwable;
 
 class PrintersTable
 {
@@ -111,13 +112,21 @@ class PrintersTable
                             'manual_poll_requested_at' => now(),
                         ])->save();
 
-                        PollPrinterJob::dispatch($record->id, 'manual');
+                        try {
+                            PollPrinterJob::dispatchSync($record->id, 'manual');
 
-                        Notification::make()
-                            ->title('Опрос поставлен в очередь')
-                            ->body("Принтер {$record->display_name} опрашивается в фоне.")
-                            ->success()
-                            ->send();
+                            Notification::make()
+                                ->title('Опрос выполнен')
+                                ->body("Принтер {$record->display_name} опрошен, запись добавлена в логи.")
+                                ->success()
+                                ->send();
+                        } catch (Throwable $exception) {
+                            Notification::make()
+                                ->title('Ошибка опроса')
+                                ->body($exception->getMessage())
+                                ->danger()
+                                ->send();
+                        }
                     }),
                 EditAction::make(),
                 DeleteAction::make(),
