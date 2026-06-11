@@ -8,11 +8,13 @@ use App\Models\Printer;
 use App\Models\PrinterPollLog;
 use App\Services\Notifications\TelegramBotService;
 use App\Services\Printers\Data\DiscoveredPrinterData;
+use App\Services\Printers\Data\SnmpDiscoveryResult;
 use App\Services\Printers\PrinterAlertService;
 use App\Services\Printers\PrinterPollingService;
 use App\Services\Printers\PrinterSnmpService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Tests\TestCase;
@@ -38,29 +40,36 @@ class PrinterPollLogTest extends TestCase
 
         $snmpService = new class extends PrinterSnmpService
         {
-            public function discover(
+            public function discoverWithDump(
                 string $ipAddress,
                 ?string $community = null,
                 ?int $timeoutMs = null,
                 ?array $probe = null,
-            ): ?DiscoveredPrinterData {
-                return new DiscoveredPrinterData(
-                    ipAddress: $ipAddress,
-                    discoveredName: 'Kyocera ECOSYS',
-                    tonerSupplies: [[
-                        'slot_key' => '1',
-                        'color' => 'black',
-                        'snmp_description' => 'TK-5240K',
-                        'level' => 70,
-                        'max_capacity' => 100,
-                        'percentage' => 70,
-                        'unit' => 'percent',
-                        'is_known' => true,
-                        'raw_value' => [
+            ): SnmpDiscoveryResult {
+                return new SnmpDiscoveryResult(
+                    discovered: new DiscoveredPrinterData(
+                        ipAddress: $ipAddress,
+                        discoveredName: 'Kyocera ECOSYS',
+                        tonerSupplies: [[
                             'slot_key' => '1',
-                            'description' => 'TK-5240K',
-                        ],
-                    ]],
+                            'color' => 'black',
+                            'snmp_description' => 'TK-5240K',
+                            'level' => 70,
+                            'max_capacity' => 100,
+                            'percentage' => 70,
+                            'unit' => 'percent',
+                            'is_known' => true,
+                            'raw_value' => [
+                                'slot_key' => '1',
+                                'description' => 'TK-5240K',
+                            ],
+                        ]],
+                    ),
+                    dump: [
+                        'ip_address' => $ipAddress,
+                        'gets' => ['1.3.6.1.2.1.1.1.0' => ['value' => 'printer', 'success' => true]],
+                        'walks' => [],
+                    ],
                 );
             }
         };
@@ -82,9 +91,12 @@ class PrinterPollLogTest extends TestCase
         $this->assertSame('success', $log->status);
         $this->assertSame('online', $log->printer_status);
         $this->assertNotNull($log->finished_at);
+        $this->assertNotNull($log->raw_snmp_dump);
+        $this->assertNotNull($log->normalized_payload);
+        $this->assertArrayHasKey('discovered', $log->normalized_payload);
     }
 
-    public function test_scheduled_poll_job_writes_offline_log(): void
+    public function test_scheduled_poll_job_writes_offline_log_with_payload(): void
     {
         $this->fakeTelegram();
 
@@ -99,12 +111,12 @@ class PrinterPollLogTest extends TestCase
 
         $snmpService = new class extends PrinterSnmpService
         {
-            public function discover(
+            public function discoverWithDump(
                 string $ipAddress,
                 ?string $community = null,
                 ?int $timeoutMs = null,
                 ?array $probe = null,
-            ): ?DiscoveredPrinterData {
+            ): SnmpDiscoveryResult {
                 throw new RuntimeException('timeout');
             }
         };
@@ -123,6 +135,9 @@ class PrinterPollLogTest extends TestCase
         $this->assertSame('offline', $log->status);
         $this->assertSame('offline', $log->printer_status);
         $this->assertNotNull($log->finished_at);
+        $this->assertSame(RuntimeException::class, $log->exception_class);
+        $this->assertNotNull($log->normalized_payload);
+        $this->assertNull($log->normalized_payload['discovered']);
     }
 
     public function test_new_poll_closes_previous_running_log_for_same_printer(): void
@@ -151,16 +166,19 @@ class PrinterPollLogTest extends TestCase
 
         $snmpService = new class extends PrinterSnmpService
         {
-            public function discover(
+            public function discoverWithDump(
                 string $ipAddress,
                 ?string $community = null,
                 ?int $timeoutMs = null,
                 ?array $probe = null,
-            ): ?DiscoveredPrinterData {
-                return new DiscoveredPrinterData(
-                    ipAddress: $ipAddress,
-                    discoveredName: 'Kyocera ECOSYS',
-                    tonerSupplies: [],
+            ): SnmpDiscoveryResult {
+                return new SnmpDiscoveryResult(
+                    discovered: new DiscoveredPrinterData(
+                        ipAddress: $ipAddress,
+                        discoveredName: 'Kyocera ECOSYS',
+                        tonerSupplies: [],
+                    ),
+                    dump: ['ip_address' => $ipAddress, 'gets' => [], 'walks' => []],
                 );
             }
         };
@@ -181,6 +199,104 @@ class PrinterPollLogTest extends TestCase
         $this->assertNotNull($latestLog);
         $this->assertNotSame($staleLog->id, $latestLog->id);
         $this->assertSame('success', $latestLog->status);
+    }
+
+    public function test_stale_is_polling_flag_is_cleared_when_no_running_log_exists(): void
+    {
+        $this->fakeTelegram();
+
+        $printer = Printer::query()->create([
+            'name' => 'Kyocera',
+            'ip_address' => '192.168.1.63',
+            'snmp_community' => 'public',
+            'snmp_version' => '2c',
+            'status' => PrinterStatus::Online,
+            'is_active' => true,
+            'is_polling' => true,
+            'manual_poll_requested_at' => now()->subMinutes(10),
+        ]);
+
+        $snmpService = new class extends PrinterSnmpService
+        {
+            public function discoverWithDump(
+                string $ipAddress,
+                ?string $community = null,
+                ?int $timeoutMs = null,
+                ?array $probe = null,
+            ): SnmpDiscoveryResult {
+                return new SnmpDiscoveryResult(
+                    discovered: new DiscoveredPrinterData(
+                        ipAddress: $ipAddress,
+                        discoveredName: 'Kyocera ECOSYS',
+                        tonerSupplies: [],
+                    ),
+                    dump: ['ip_address' => $ipAddress, 'gets' => [], 'walks' => []],
+                );
+            }
+        };
+
+        $service = new PrinterPollingService(
+            $snmpService,
+            new PrinterAlertService(new TelegramBotService()),
+        );
+
+        (new PollPrinterJob($printer->id, 'scheduled'))->handle($service);
+
+        $printer->refresh();
+
+        $this->assertFalse($printer->is_polling);
+        $this->assertNull($printer->manual_poll_requested_at);
+    }
+
+    public function test_printers_poll_command_dispatches_jobs_for_active_printers(): void
+    {
+        Bus::fake();
+
+        Printer::query()->create([
+            'name' => 'Active',
+            'ip_address' => '192.168.1.70',
+            'status' => PrinterStatus::Online,
+            'is_active' => true,
+        ]);
+
+        Printer::query()->create([
+            'name' => 'Inactive',
+            'ip_address' => '192.168.1.71',
+            'status' => PrinterStatus::Online,
+            'is_active' => false,
+        ]);
+
+        $this->artisan('printers:poll')->assertSuccessful();
+
+        Bus::assertDispatched(PollPrinterJob::class, 1);
+    }
+
+    public function test_poll_log_view_page_renders_without_payload(): void
+    {
+        $printer = Printer::query()->create([
+            'name' => 'Kyocera',
+            'ip_address' => '192.168.1.64',
+            'status' => PrinterStatus::Online,
+            'is_active' => true,
+        ]);
+
+        $log = PrinterPollLog::query()->create([
+            'printer_id' => $printer->id,
+            'source' => 'scheduled',
+            'status' => 'success',
+            'printer_name' => $printer->display_name,
+            'printer_ip' => $printer->ip_address,
+            'printer_status' => 'online',
+            'started_at' => now(),
+            'finished_at' => now(),
+            'duration_ms' => 100,
+        ]);
+
+        $user = \App\Models\User::factory()->create();
+
+        $this->actingAs($user)
+            ->get("/admin/printer-poll-logs/{$log->id}")
+            ->assertSuccessful();
     }
 
     private function fakeTelegram(): void

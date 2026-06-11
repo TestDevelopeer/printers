@@ -19,6 +19,10 @@ class PrinterPollLog extends Model
         'printer_ip',
         'printer_status',
         'message',
+        'raw_snmp_dump',
+        'normalized_payload',
+        'exception_class',
+        'is_partial_response',
         'started_at',
         'finished_at',
         'duration_ms',
@@ -27,6 +31,9 @@ class PrinterPollLog extends Model
     protected function casts(): array
     {
         return [
+            'raw_snmp_dump' => 'array',
+            'normalized_payload' => 'array',
+            'is_partial_response' => 'boolean',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
         ];

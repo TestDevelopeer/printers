@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PrinterPollLogs;
 
 use App\Models\PrinterPollLog;
+use Filament\Actions\ViewAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -71,7 +72,9 @@ class PrinterPollLogsTable
                         'error' => 'Ошибка',
                     ]),
             ])
-            ->recordActions([])
+            ->recordActions([
+                ViewAction::make(),
+            ])
             ->toolbarActions([]);
     }
 }

@@ -6,6 +6,8 @@ use App\Enums\PrinterStatus;
 use App\Models\Printer;
 use App\Models\TonerSupply;
 use App\Services\Printers\Data\DiscoveredPrinterData;
+use App\Services\Printers\Data\PrinterPollResult;
+use App\Services\Printers\Data\SnmpDiscoveryResult;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
@@ -21,35 +23,49 @@ class PrinterPollingService
     ) {
     }
 
-    public function poll(Printer $printer): Printer
+    public function poll(Printer $printer): PrinterPollResult
     {
         $previousStatus = $printer->status;
         $previousLowTonerStates = $this->snapshotLowTonerStates($printer);
         $previousActiveSupplies = $this->snapshotActiveSupplies($printer);
 
         try {
-            $discovered = $this->printerSnmpService->discover(
+            $discovery = $this->printerSnmpService->discoverWithDump(
                 $printer->ip_address,
                 $printer->snmp_community,
                 config('printers.poll_timeout', 1000),
             );
 
-            if ($discovered === null) {
-                return $this->markOffline(
+            if ($discovery->discovered === null) {
+                $printer = $this->markOffline(
                     $printer,
-                    'Устройство ответило по SNMP, но не определилось как принтер.',
+                    $discovery->failureReason ?? 'Устройство ответило по SNMP, но не определилось как принтер.',
                     $previousStatus,
                     $previousLowTonerStates,
                     $previousActiveSupplies,
                 );
+
+                return new PrinterPollResult(
+                    printer: $printer,
+                    rawSnmpDump: $discovery->dump,
+                    normalizedPayload: $this->buildFailurePayload($discovery, $printer),
+                    isPartialResponse: $discovery->isPartialResponse,
+                );
             }
 
-            return $this->syncFromDiscovery(
+            $printer = $this->syncFromDiscovery(
                 $printer,
-                $discovered,
+                $discovery->discovered,
                 $previousStatus,
                 $previousLowTonerStates,
                 $previousActiveSupplies,
+            );
+
+            return new PrinterPollResult(
+                printer: $printer,
+                rawSnmpDump: $discovery->dump,
+                normalizedPayload: $this->buildSuccessPayload($discovery),
+                isPartialResponse: $discovery->isPartialResponse,
             );
         } catch (Throwable $exception) {
             $status = $this->isOfflineError($exception) ? PrinterStatus::Offline : PrinterStatus::Error;
@@ -70,7 +86,17 @@ class PrinterPollingService
                 $previousActiveSupplies,
             );
 
-            return $printer;
+            return new PrinterPollResult(
+                printer: $printer,
+                rawSnmpDump: null,
+                normalizedPayload: [
+                    'discovered' => null,
+                    'failure_reason' => $exception->getMessage(),
+                    'printer_status' => $printer->status?->value,
+                ],
+                exceptionClass: $exception::class,
+                isPartialResponse: false,
+            );
         }
     }
 
@@ -179,6 +205,30 @@ class PrinterPollingService
 
             return $supply;
         });
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildSuccessPayload(SnmpDiscoveryResult $discovery): array
+    {
+        return [
+            'discovered' => $discovery->discovered?->toArray(),
+            'failure_reason' => null,
+            'printer_status' => PrinterStatus::Online->value,
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildFailurePayload(SnmpDiscoveryResult $discovery, Printer $printer): array
+    {
+        return [
+            'discovered' => null,
+            'failure_reason' => $discovery->failureReason,
+            'printer_status' => $printer->status?->value,
+        ];
     }
 
     /**

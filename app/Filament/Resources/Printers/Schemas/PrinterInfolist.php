@@ -28,7 +28,6 @@ class PrinterInfolist
                 Section::make('Фоновый опрос')
                     ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->visible(fn (Printer $record): bool => (bool) $record->is_polling)
-                    ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->schema([
                         TextEntry::make('manual_poll_requested_at')
                             ->label('Состояние')

@@ -4,7 +4,8 @@ namespace App\Services\Printers;
 
 use App\Enums\TonerColor;
 use App\Services\Printers\Data\DiscoveredPrinterData;
-use RuntimeException;
+use App\Services\Printers\Data\SnmpDiscoveryResult;
+use App\Services\Printers\Data\SnmpDumpBuilder;
 
 class PrinterSnmpService
 {
@@ -59,21 +60,45 @@ class PrinterSnmpService
         ?array $probe = null,
     ): ?DiscoveredPrinterData
     {
+        return $this->discoverWithDump($ipAddress, $community, $timeoutMs, $probe)->discovered;
+    }
+
+    public function discoverWithDump(
+        string $ipAddress,
+        ?string $community = null,
+        ?int $timeoutMs = null,
+        ?array $probe = null,
+    ): SnmpDiscoveryResult
+    {
         $community ??= config('printers.default_snmp_community', 'public');
         $timeoutMs ??= config('printers.poll_timeout', 1000);
 
         $this->configureSnmp();
 
-        $description = $probe['description'] ?? $this->snmpGet($ipAddress, self::SYS_DESCR, $community, $timeoutMs);
-        $hostname = $probe['hostname'] ?? $this->snmpGet($ipAddress, self::SYS_NAME, $community, $timeoutMs);
-        $location = $this->snmpGet($ipAddress, self::SYS_LOCATION, $community, $timeoutMs);
-        $printerName = $probe['printer_name'] ?? $this->snmpGet($ipAddress, self::PRINTER_NAME, $community, $timeoutMs);
-        $serialNumber = $this->snmpGet($ipAddress, self::SERIAL_NUMBER, $community, $timeoutMs);
+        $dumpBuilder = new SnmpDumpBuilder();
 
-        $tonerSupplies = $this->readTonerSupplies($ipAddress, $community, $timeoutMs);
+        $description = $probe['description'] ?? $this->snmpGet($ipAddress, self::SYS_DESCR, $community, $timeoutMs, $dumpBuilder);
+        $hostname = $probe['hostname'] ?? $this->snmpGet($ipAddress, self::SYS_NAME, $community, $timeoutMs, $dumpBuilder);
+        $location = $this->snmpGet($ipAddress, self::SYS_LOCATION, $community, $timeoutMs, $dumpBuilder);
+        $printerName = $probe['printer_name'] ?? $this->snmpGet($ipAddress, self::PRINTER_NAME, $community, $timeoutMs, $dumpBuilder);
+        $serialNumber = $this->snmpGet($ipAddress, self::SERIAL_NUMBER, $community, $timeoutMs, $dumpBuilder);
+
+        $tonerSupplies = $this->readTonerSupplies($ipAddress, $community, $timeoutMs, $dumpBuilder);
+
+        $dump = $dumpBuilder->toArray($ipAddress, $community, $timeoutMs);
+        $isPartial = $dumpBuilder->hasFailedRequests()
+            || $dumpBuilder->hasEmptyWalksWithData()
+            || ($dumpBuilder->hasAnyData() && $printerName === null && empty($tonerSupplies));
 
         if (! $printerName && empty($tonerSupplies) && ! $this->looksLikePrinter($description)) {
-            return null;
+            return new SnmpDiscoveryResult(
+                discovered: null,
+                dump: $dump,
+                isPartialResponse: $isPartial || $dumpBuilder->hasAnyData(),
+                failureReason: $dumpBuilder->hasAnyData()
+                    ? 'Устройство ответило по SNMP, но не определилось как принтер.'
+                    : 'SNMP-ответ не получен или устройство не отвечает.',
+            );
         }
 
         ['manufacturer' => $manufacturer, 'model' => $model] = $this->extractManufacturerAndModel(
@@ -81,19 +106,24 @@ class PrinterSnmpService
             $printerName,
         );
 
-        return new DiscoveredPrinterData(
-            ipAddress: $ipAddress,
-            discoveredName: $printerName ?: $hostname,
-            hostname: $hostname,
-            macAddress: null,
-            manufacturer: $manufacturer,
-            model: $model,
-            serialNumber: $serialNumber,
-            location: $location,
-            description: $description,
-            tonerSupplies: $tonerSupplies,
-            snmpCommunity: $community,
-            snmpVersion: config('printers.default_snmp_version', '2c'),
+        return new SnmpDiscoveryResult(
+            discovered: new DiscoveredPrinterData(
+                ipAddress: $ipAddress,
+                discoveredName: $printerName ?: $hostname,
+                hostname: $hostname,
+                macAddress: null,
+                manufacturer: $manufacturer,
+                model: $model,
+                serialNumber: $serialNumber,
+                location: $location,
+                description: $description,
+                tonerSupplies: $tonerSupplies,
+                snmpCommunity: $community,
+                snmpVersion: config('printers.default_snmp_version', '2c'),
+            ),
+            dump: $dump,
+            isPartialResponse: $isPartial,
+            failureReason: null,
         );
     }
 
@@ -104,50 +134,77 @@ class PrinterSnmpService
         snmp_set_oid_output_format(SNMP_OID_OUTPUT_NUMERIC);
     }
 
-    private function snmpGet(string $ipAddress, string $oid, string $community, int $timeoutMs): ?string
+    private function snmpGet(
+        string $ipAddress,
+        string $oid,
+        string $community,
+        int $timeoutMs,
+        ?SnmpDumpBuilder $dumpBuilder = null,
+    ): ?string
     {
         $result = @snmp2_get($ipAddress, $community, $oid, $timeoutMs * 1000, 0);
 
-        if ($result === false) {
-            return null;
+        $value = null;
+        $success = $result !== false;
+
+        if ($success) {
+            $value = trim((string) $result, "\" \t\n\r\0\x0B");
+            $value = $value === '' ? null : $value;
         }
 
-        $value = trim((string) $result, "\" \t\n\r\0\x0B");
+        $dumpBuilder?->recordGet($oid, $value, $success);
 
-        return $value === '' ? null : $value;
+        return $value;
     }
 
     /**
      * @return array<string, string>
      */
-    private function snmpWalk(string $ipAddress, string $oid, string $community, int $timeoutMs): array
+    private function snmpWalk(
+        string $ipAddress,
+        string $oid,
+        string $community,
+        int $timeoutMs,
+        ?SnmpDumpBuilder $dumpBuilder = null,
+    ): array
     {
         $result = @snmp2_real_walk($ipAddress, $community, $oid, $timeoutMs * 1000, 0);
 
         if ($result === false) {
+            $dumpBuilder?->recordWalk($oid, []);
+
             return [];
         }
 
-        return array_map(
+        $normalized = array_map(
             static fn (mixed $value): string => trim((string) $value, "\" \t\n\r\0\x0B"),
             $result,
         );
+
+        $dumpBuilder?->recordWalk($oid, $normalized);
+
+        return $normalized;
     }
 
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function readTonerSupplies(string $ipAddress, string $community, int $timeoutMs): array
+    private function readTonerSupplies(
+        string $ipAddress,
+        string $community,
+        int $timeoutMs,
+        ?SnmpDumpBuilder $dumpBuilder = null,
+    ): array
     {
-        $markerIndexes = $this->snmpWalk($ipAddress, self::SUPPLIES_MARKER_INDEX, $community, $timeoutMs);
-        $colorantIndexes = $this->snmpWalk($ipAddress, self::SUPPLIES_COLORANT_INDEX, $community, $timeoutMs);
-        $classes = $this->snmpWalk($ipAddress, self::SUPPLIES_CLASS, $community, $timeoutMs);
-        $types = $this->snmpWalk($ipAddress, self::SUPPLIES_TYPE, $community, $timeoutMs);
-        $descriptions = $this->snmpWalk($ipAddress, self::SUPPLIES_DESCRIPTION, $community, $timeoutMs);
-        $units = $this->snmpWalk($ipAddress, self::SUPPLIES_UNIT, $community, $timeoutMs);
-        $levels = $this->snmpWalk($ipAddress, self::SUPPLIES_LEVEL, $community, $timeoutMs);
-        $capacities = $this->snmpWalk($ipAddress, self::SUPPLIES_CAPACITY, $community, $timeoutMs);
-        $colorantValues = $this->snmpWalk($ipAddress, self::COLORANT_VALUE, $community, $timeoutMs);
+        $markerIndexes = $this->snmpWalk($ipAddress, self::SUPPLIES_MARKER_INDEX, $community, $timeoutMs, $dumpBuilder);
+        $colorantIndexes = $this->snmpWalk($ipAddress, self::SUPPLIES_COLORANT_INDEX, $community, $timeoutMs, $dumpBuilder);
+        $classes = $this->snmpWalk($ipAddress, self::SUPPLIES_CLASS, $community, $timeoutMs, $dumpBuilder);
+        $types = $this->snmpWalk($ipAddress, self::SUPPLIES_TYPE, $community, $timeoutMs, $dumpBuilder);
+        $descriptions = $this->snmpWalk($ipAddress, self::SUPPLIES_DESCRIPTION, $community, $timeoutMs, $dumpBuilder);
+        $units = $this->snmpWalk($ipAddress, self::SUPPLIES_UNIT, $community, $timeoutMs, $dumpBuilder);
+        $levels = $this->snmpWalk($ipAddress, self::SUPPLIES_LEVEL, $community, $timeoutMs, $dumpBuilder);
+        $capacities = $this->snmpWalk($ipAddress, self::SUPPLIES_CAPACITY, $community, $timeoutMs, $dumpBuilder);
+        $colorantValues = $this->snmpWalk($ipAddress, self::COLORANT_VALUE, $community, $timeoutMs, $dumpBuilder);
 
         $supplies = [];
 

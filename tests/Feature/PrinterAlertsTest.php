@@ -131,12 +131,12 @@ class PrinterAlertsTest extends TestCase
 
         $snmpService = new class extends PrinterSnmpService
         {
-            public function discover(
+            public function discoverWithDump(
                 string $ipAddress,
                 ?string $community = null,
                 ?int $timeoutMs = null,
                 ?array $probe = null,
-            ): ?DiscoveredPrinterData {
+            ): \App\Services\Printers\Data\SnmpDiscoveryResult {
                 throw new RuntimeException('timeout');
             }
         };

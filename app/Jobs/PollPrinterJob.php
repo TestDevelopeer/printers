@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Printer;
 use App\Models\PrinterPollLog;
+use App\Services\Printers\Data\PrinterPollResult;
 use App\Services\Printers\PrinterPollingService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -48,6 +49,8 @@ class PollPrinterJob implements ShouldQueue, ShouldBeUnique
 
         $startedAt = Carbon::now();
         $this->closeDanglingLogs($printer, $startedAt);
+        $this->resetStalePollingState($printer);
+        $printer->refresh();
 
         $log = PrinterPollLog::query()->create([
             'printer_id' => $printer->id,
@@ -62,15 +65,7 @@ class PollPrinterJob implements ShouldQueue, ShouldBeUnique
             $result = $printerPollingService->poll($printer);
 
             $finishedAt = Carbon::now();
-            $log->forceFill([
-                'status' => $this->resolveLogStatus($result),
-                'printer_name' => $result->display_name,
-                'printer_ip' => $result->ip_address,
-                'printer_status' => $result->status?->value,
-                'message' => $result->last_error,
-                'finished_at' => $finishedAt,
-                'duration_ms' => $startedAt->diffInMilliseconds($finishedAt),
-            ])->save();
+            $this->fillLogFromResult($log, $result, $startedAt, $finishedAt);
         } catch (Throwable $exception) {
             $finishedAt = Carbon::now();
 
@@ -78,6 +73,7 @@ class PollPrinterJob implements ShouldQueue, ShouldBeUnique
                 'status' => 'error',
                 'printer_status' => $printer->fresh()?->status?->value,
                 'message' => $exception->getMessage(),
+                'exception_class' => $exception::class,
                 'finished_at' => $finishedAt,
                 'duration_ms' => $startedAt->diffInMilliseconds($finishedAt),
             ])->save();
@@ -91,6 +87,29 @@ class PollPrinterJob implements ShouldQueue, ShouldBeUnique
                     'manual_poll_requested_at' => null,
                 ]);
         }
+    }
+
+    private function fillLogFromResult(
+        PrinterPollLog $log,
+        PrinterPollResult $result,
+        Carbon $startedAt,
+        Carbon $finishedAt,
+    ): void {
+        $printer = $result->printer;
+
+        $log->forceFill([
+            'status' => $this->resolveLogStatus($printer),
+            'printer_name' => $printer->display_name,
+            'printer_ip' => $printer->ip_address,
+            'printer_status' => $printer->status?->value,
+            'message' => $printer->last_error,
+            'raw_snmp_dump' => $result->rawSnmpDump,
+            'normalized_payload' => $result->normalizedPayload,
+            'exception_class' => $result->exceptionClass,
+            'is_partial_response' => $result->isPartialResponse,
+            'finished_at' => $finishedAt,
+            'duration_ms' => $startedAt->diffInMilliseconds($finishedAt),
+        ])->save();
     }
 
     private function resolveLogStatus(Printer $printer): string
@@ -122,5 +141,35 @@ class PollPrinterJob implements ShouldQueue, ShouldBeUnique
                 'duration_ms' => $durationMs,
             ])->save();
         }
+
+        if ($runningLogs->isNotEmpty()) {
+            Printer::query()
+                ->whereKey($printer->getKey())
+                ->update([
+                    'is_polling' => false,
+                    'manual_poll_requested_at' => null,
+                ]);
+        }
+    }
+
+    private function resetStalePollingState(Printer $printer): void
+    {
+        if (! $printer->is_polling) {
+            return;
+        }
+
+        $hasRunningLog = PrinterPollLog::query()
+            ->where('printer_id', $printer->getKey())
+            ->where('status', 'running')
+            ->exists();
+
+        if ($hasRunningLog) {
+            return;
+        }
+
+        $printer->forceFill([
+            'is_polling' => false,
+            'manual_poll_requested_at' => null,
+        ])->save();
     }
 }
