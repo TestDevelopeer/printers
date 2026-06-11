@@ -50,17 +50,15 @@ class Printer extends Model
     {
         return $this->hasMany(TonerSupply::class)
             ->whereNull('removed_at')
-            ->orderBy('color')
-            ->orderBy('snmp_description');
+            ->orderByInstallationSlot();
     }
 
     public function tonerHistory(): HasMany
     {
         return $this->hasMany(TonerSupply::class)
             ->whereNotNull('removed_at')
-            ->orderByDesc('removed_at')
-            ->orderBy('color')
-            ->orderBy('snmp_description');
+            ->orderByInstallationSlot(preferHistorySlot: true)
+            ->orderByDesc('removed_at');
     }
 
     public function allTonerSupplies(): HasMany
@@ -95,9 +93,20 @@ class Printer extends Model
 
     public function getDisplayedTonerSuppliesAttribute(): EloquentCollection
     {
-        return $this->tonerSupplies()
-            ->orderBy('slot_key')
-            ->get();
+        $supplies = $this->relationLoaded('tonerSupplies')
+            ? $this->tonerSupplies
+            : $this->tonerSupplies()->get();
+
+        return TonerSupply::sortByInstallationSlot($supplies);
+    }
+
+    public function getDisplayedTonerHistoryAttribute(): EloquentCollection
+    {
+        $supplies = $this->relationLoaded('tonerHistory')
+            ? $this->tonerHistory
+            : $this->tonerHistory()->get();
+
+        return TonerSupply::sortByInstallationSlot($supplies, preferHistorySlot: true);
     }
 
     public function getTonerSummaryAttribute(): string

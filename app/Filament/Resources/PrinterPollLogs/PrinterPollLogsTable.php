@@ -43,7 +43,7 @@ class PrinterPollLogsTable
                     ->placeholder('Неизвестно'),
                 TextColumn::make('duration_ms')
                     ->label('Длительность')
-                    ->formatStateUsing(fn (?int $state): string => $state === null ? '—' : "{$state} мс")
+                    ->formatStateUsing(fn (int|float|null $state): string => $state === null ? '—' : sprintf('%d мс', (int) round($state)))
                     ->sortable(),
                 TextColumn::make('message')
                     ->label('Сообщение')

@@ -34,7 +34,7 @@ class PrinterPollLogInfolist
                             ->label('IP'),
                         TextEntry::make('duration_ms')
                             ->label('Длительность')
-                            ->formatStateUsing(fn (?int $state): string => $state === null ? '—' : "{$state} мс"),
+                            ->formatStateUsing(fn (int|float|null $state): string => $state === null ? '—' : sprintf('%d мс', (int) round($state))),
                         TextEntry::make('started_at')
                             ->label('Начало')
                             ->dateTime(),
@@ -60,18 +60,18 @@ class PrinterPollLogInfolist
                     ]),
                 Section::make('Нормализованный результат')
                     ->schema([
-                        TextEntry::make('normalized_payload')
+                        TextEntry::make('normalized_payload_json')
                             ->label('')
-                            ->formatStateUsing(fn (?array $state): string => self::formatJson($state))
+                            ->state(fn (PrinterPollLog $record): string => self::formatJson($record->normalized_payload))
                             ->extraAttributes(['class' => 'font-mono text-xs whitespace-pre-wrap'])
                             ->columnSpanFull(),
                     ])
                     ->collapsible(),
                 Section::make('Сырой SNMP dump')
                     ->schema([
-                        TextEntry::make('raw_snmp_dump')
+                        TextEntry::make('raw_snmp_dump_json')
                             ->label('')
-                            ->formatStateUsing(fn (?array $state): string => self::formatJson($state))
+                            ->state(fn (PrinterPollLog $record): string => self::formatJson($record->raw_snmp_dump))
                             ->extraAttributes(['class' => 'font-mono text-xs whitespace-pre-wrap'])
                             ->columnSpanFull(),
                     ])
@@ -88,6 +88,11 @@ class PrinterPollLogInfolist
             return '—';
         }
 
-        return json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '—';
+        $encoded = json_encode(
+            $data,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE,
+        );
+
+        return $encoded === false ? '—' : $encoded;
     }
 }

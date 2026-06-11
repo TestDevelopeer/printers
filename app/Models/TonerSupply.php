@@ -3,6 +3,8 @@
 namespace App\Models;
 
 use App\Enums\TonerColor;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -64,6 +66,53 @@ class TonerSupply extends Model
     public function transferTargetPrinter(): BelongsTo
     {
         return $this->belongsTo(Printer::class, 'transfer_target_printer_id');
+    }
+
+    public function scopeOrderByInstallationSlot(Builder $query, bool $preferHistorySlot = false): Builder
+    {
+        $slotExpression = $preferHistorySlot ? 'COALESCE(history_slot_key, slot_key)' : 'slot_key';
+        $driver = $query->getConnection()->getDriverName();
+
+        if ($driver === 'pgsql') {
+            return $query
+                ->orderByRaw(
+                    "CASE WHEN {$slotExpression} ~ '^[0-9]+$' THEN {$slotExpression}::integer ELSE 2147483647 END ASC"
+                )
+                ->orderByRaw("{$slotExpression} ASC");
+        }
+
+        return $query
+            ->orderByRaw("CAST({$slotExpression} AS INTEGER) ASC")
+            ->orderByRaw("{$slotExpression} ASC");
+    }
+
+    /**
+     * @param  EloquentCollection<int, TonerSupply>  $supplies
+     * @return EloquentCollection<int, TonerSupply>
+     */
+    public static function sortByInstallationSlot(
+        EloquentCollection $supplies,
+        bool $preferHistorySlot = false,
+    ): EloquentCollection {
+        return $supplies
+            ->sortBy(fn (TonerSupply $supply): array => [
+                self::slotSortValue($preferHistorySlot
+                    ? ($supply->history_slot_key ?? $supply->slot_key)
+                    : $supply->slot_key),
+                $preferHistorySlot
+                    ? ($supply->history_slot_key ?? $supply->slot_key ?? '')
+                    : ($supply->slot_key ?? ''),
+            ])
+            ->values();
+    }
+
+    public static function slotSortValue(?string $slotKey): int
+    {
+        if ($slotKey !== null && ctype_digit($slotKey)) {
+            return (int) $slotKey;
+        }
+
+        return PHP_INT_MAX;
     }
 
     public function isLow(): bool

@@ -272,6 +272,46 @@ class PrinterPollLogTest extends TestCase
         Bus::assertDispatched(PollPrinterJob::class, 1);
     }
 
+    public function test_poll_log_view_page_renders_with_full_payload_and_fractional_duration(): void
+    {
+        $dumpPath = base_path('storage/app/printer-poll-dumps/2026-06-11/192.168.1.90.json');
+
+        if (! is_file($dumpPath)) {
+            $this->markTestSkipped('SNMP dump fixture is missing.');
+        }
+
+        /** @var array<string, mixed> $fixture */
+        $fixture = json_decode((string) file_get_contents($dumpPath), true, flags: JSON_THROW_ON_ERROR);
+
+        $printer = Printer::query()->create([
+            'name' => 'Kyocera',
+            'ip_address' => '192.168.1.90',
+            'status' => PrinterStatus::Online,
+            'is_active' => true,
+        ]);
+
+        $log = PrinterPollLog::query()->create([
+            'printer_id' => $printer->id,
+            'source' => 'manual',
+            'status' => 'success',
+            'printer_name' => $printer->display_name,
+            'printer_ip' => $printer->ip_address,
+            'printer_status' => 'online',
+            'raw_snmp_dump' => $fixture['raw_snmp_dump'] ?? null,
+            'normalized_payload' => $fixture['normalized_payload'] ?? null,
+            'is_partial_response' => (bool) ($fixture['is_partial_response'] ?? false),
+            'started_at' => now(),
+            'finished_at' => now(),
+            'duration_ms' => (int) round((float) ($fixture['duration_ms'] ?? 0)),
+        ]);
+
+        $user = \App\Models\User::factory()->create();
+
+        $this->actingAs($user)
+            ->get("/admin/printer-poll-logs/{$log->id}")
+            ->assertSuccessful();
+    }
+
     public function test_poll_log_view_page_renders_without_payload(): void
     {
         $printer = Printer::query()->create([

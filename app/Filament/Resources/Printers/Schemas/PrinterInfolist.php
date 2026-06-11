@@ -103,8 +103,9 @@ class PrinterInfolist
                 Section::make('История картриджей')
                     ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->schema([
-                        RepeatableEntry::make('tonerHistory')
+                        RepeatableEntry::make('displayed_toner_history')
                             ->label('')
+                            ->state(fn (Printer $record) => $record->displayed_toner_history)
                             ->contained(true)
                             ->placeholder('История картриджей пуста')
                             ->schema([
