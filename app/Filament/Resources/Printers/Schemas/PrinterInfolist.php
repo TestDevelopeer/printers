@@ -16,6 +16,7 @@ use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Infolists\Components\ViewEntry;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Actions;
 use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -76,6 +77,10 @@ class PrinterInfolist
                                         ->badge()
                                         ->color('warning')
                                         ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation),
+                                    Actions::make([
+                                        self::chooseCartridgeIdentityAction(),
+                                    ])
+                                        ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation),
                                 ])->columnSpan(1),
                                 Group::make([
                                     TextEntry::make('display_name')
@@ -89,10 +94,6 @@ class PrinterInfolist
                                         ->label('Комментарий')
                                         ->placeholder('Без комментария')
                                         ->suffixAction(self::editSupplyMetadataAction('edit_active_supply_metadata')),
-                                    TextEntry::make('choose_identity')
-                                        ->label('')
-                                        ->state('')
-                                        ->suffixAction(self::chooseCartridgeIdentityAction()),
                                 ])->columnSpan(1),
                             ])
                             ->columns(2),
@@ -136,6 +137,9 @@ class PrinterInfolist
                                         ->label('Перемещен в историю')
                                         ->dateTime()
                                         ->placeholder('Неизвестно'),
+                                    Actions::make([
+                                        self::deleteHistorySupplyAction(),
+                                    ]),
                                 ])->columnSpan(1),
                             ])
                             ->columns(2),
@@ -180,8 +184,11 @@ class PrinterInfolist
     private static function chooseCartridgeIdentityAction(): Action
     {
         return Action::make('choose_cartridge_identity')
+            ->button()
             ->icon('heroicon-m-queue-list')
             ->label('Выбрать')
+            ->color('warning')
+            ->size('sm')
             ->modalHeading('Выбор картриджа для слота')
             ->modalDescription('Выберите картридж из истории этого слота или сохраните текущий как новый.')
             ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation)
@@ -245,6 +252,27 @@ class PrinterInfolist
 
                 Notification::make()
                     ->title('Картридж для слота подтверждён')
+                    ->success()
+                    ->send();
+            });
+    }
+
+    private static function deleteHistorySupplyAction(): Action
+    {
+        return Action::make('delete_history_supply')
+            ->button()
+            ->icon('heroicon-m-trash')
+            ->label('Удалить')
+            ->color('danger')
+            ->size('sm')
+            ->requiresConfirmation()
+            ->modalHeading('Удалить картридж из истории')
+            ->modalDescription('Запись будет удалена из базы без возможности восстановления.')
+            ->action(function (TonerSupply $record): void {
+                app(TonerSupplyIdentityService::class)->deleteFromHistory($record);
+
+                Notification::make()
+                    ->title('Картридж удалён из истории')
                     ->success()
                     ->send();
             });

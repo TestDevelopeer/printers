@@ -60,6 +60,19 @@ class TonerSupplyIdentityService
         });
     }
 
+    public function deleteFromHistory(TonerSupply $supply): void
+    {
+        if ($supply->removed_at === null) {
+            throw new InvalidArgumentException('Можно удалять только картриджи из истории.');
+        }
+
+        if ($supply->needs_identity_confirmation) {
+            throw new InvalidArgumentException('Нельзя удалить картридж, ожидающий подтверждения.');
+        }
+
+        $supply->delete();
+    }
+
     public function saveAsNew(Printer $printer, string $slotKey, string $comment): TonerSupply
     {
         return DB::transaction(function () use ($printer, $slotKey, $comment): TonerSupply {

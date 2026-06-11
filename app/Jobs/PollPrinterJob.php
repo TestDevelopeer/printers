@@ -69,7 +69,7 @@ class PollPrinterJob implements ShouldQueue
                 'message' => $exception->getMessage(),
                 'exception_class' => $exception::class,
                 'finished_at' => $finishedAt,
-                'duration_ms' => $startedAt->diffInMilliseconds($finishedAt),
+                'duration_ms' => $this->durationMs($startedAt, $finishedAt),
             ])->save();
 
             throw $exception;
@@ -112,8 +112,17 @@ class PollPrinterJob implements ShouldQueue
             'exception_class' => $result->exceptionClass,
             'is_partial_response' => $result->isPartialResponse,
             'finished_at' => $finishedAt,
-            'duration_ms' => $startedAt->diffInMilliseconds($finishedAt),
+            'duration_ms' => $this->durationMs($startedAt, $finishedAt),
         ])->save();
+    }
+
+    private function durationMs(?Carbon $startedAt, Carbon $finishedAt): ?int
+    {
+        if (! $startedAt instanceof Carbon) {
+            return null;
+        }
+
+        return (int) round($startedAt->diffInMilliseconds($finishedAt));
     }
 
     private function resolveLogStatus(Printer $printer): string
@@ -133,16 +142,12 @@ class PollPrinterJob implements ShouldQueue
             ->get();
 
         foreach ($runningLogs as $runningLog) {
-            $durationMs = $runningLog->started_at instanceof Carbon
-                ? $runningLog->started_at->diffInMilliseconds($finishedAt)
-                : null;
-
             $runningLog->forceFill([
                 'status' => 'error',
                 'printer_status' => $printer->status?->value,
                 'message' => 'Previous poll did not finish cleanly.',
                 'finished_at' => $finishedAt,
-                'duration_ms' => $durationMs,
+                'duration_ms' => $this->durationMs($runningLog->started_at, $finishedAt),
             ])->save();
         }
 

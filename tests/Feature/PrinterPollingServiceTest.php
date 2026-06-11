@@ -196,6 +196,48 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertTrue($printer->tonerHistory()->whereKey($provisional?->id)->exists());
     }
 
+    public function test_delete_from_history_removes_supply_record(): void
+    {
+        $printer = $this->makePrinter('192.168.1.32');
+        $service = $this->makeService();
+        $identityService = new TonerSupplyIdentityService();
+
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 12),
+        ]));
+
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 88),
+        ]));
+
+        $historySupply = $printer->fresh()->tonerHistory()->first();
+
+        $this->assertNotNull($historySupply);
+
+        $identityService->deleteFromHistory($historySupply);
+
+        $this->assertDatabaseMissing('toner_supplies', [
+            'id' => $historySupply->id,
+        ]);
+    }
+
+    public function test_delete_from_history_rejects_active_supply(): void
+    {
+        $printer = $this->makePrinter('192.168.1.33');
+        $service = $this->makeService();
+        $identityService = new TonerSupplyIdentityService();
+
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('2', 'magenta', 'TK-5240M', 12),
+        ]));
+
+        $activeSupply = $printer->fresh()->tonerSupplies()->first();
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $identityService->deleteFromHistory($activeSupply);
+    }
+
     /**
      * @param  array<int, array<string, mixed>>  $supplies
      */

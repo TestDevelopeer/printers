@@ -196,6 +196,7 @@ class PrinterPollLogTest extends TestCase
         $this->assertSame('error', $staleLog->status);
         $this->assertSame('Previous poll did not finish cleanly.', $staleLog->message);
         $this->assertNotNull($staleLog->finished_at);
+        $this->assertIsInt($staleLog->duration_ms);
         $this->assertNotNull($latestLog);
         $this->assertNotSame($staleLog->id, $latestLog->id);
         $this->assertSame('success', $latestLog->status);
