@@ -279,6 +279,12 @@ class PrinterPollingService
                 continue;
             }
 
+            if ($this->shouldPreserveKnownState($activeSupply, $normalized)) {
+                $activeSupply->forceFill(['last_seen_at' => $now])->save();
+
+                continue;
+            }
+
             $this->updateSupplySnmpData($activeSupply, $normalized, $now);
         }
 
@@ -366,23 +372,26 @@ class PrinterPollingService
      */
     private function isReplacementDetected(TonerSupply $activeSupply, array $normalized): bool
     {
-        $activeWasKnown = $this->isKnownSupplyState($activeSupply->is_known, $activeSupply->percentage);
-        $normalizedIsUnknown = $this->isUnknownSupplyState(
-            (bool) $normalized['is_known'],
-            $normalized['percentage'],
-        );
-
-        if ($activeWasKnown && $normalizedIsUnknown) {
-            return true;
+        if (! $this->isKnownSupplyState($activeSupply->is_known, $activeSupply->percentage)) {
+            return false;
         }
 
-        if (! $activeWasKnown || $normalizedIsUnknown) {
+        if ($this->isUnknownSupplyState((bool) $normalized['is_known'], $normalized['percentage'])) {
             return false;
         }
 
         $minIncrease = (int) config('printers.replacement_detection_min_increase', 3);
 
         return ((int) $normalized['percentage'] - (int) $activeSupply->percentage) >= $minIncrease;
+    }
+
+    /**
+     * @param  array<string, mixed>  $normalized
+     */
+    private function shouldPreserveKnownState(TonerSupply $activeSupply, array $normalized): bool
+    {
+        return $this->isKnownSupplyState($activeSupply->is_known, $activeSupply->percentage)
+            && $this->isUnknownSupplyState((bool) $normalized['is_known'], $normalized['percentage']);
     }
 
     private function isKnownSupplyState(bool $isKnown, ?int $percentage): bool

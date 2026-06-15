@@ -88,7 +88,7 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertFalse($printer->tonerSupplies()->first()?->needs_identity_confirmation);
     }
 
-    public function test_unknown_toner_status_triggers_replacement_when_previous_was_known(): void
+    public function test_unknown_toner_status_does_not_trigger_replacement_when_previous_was_known(): void
     {
         $printer = $this->makePrinter('192.168.1.28');
         $service = $this->makeService();
@@ -97,7 +97,7 @@ class PrinterPollingServiceTest extends TestCase
             $this->supply('1', 'black', 'TK-5240K', 45),
         ]));
 
-        $oldSupply = $printer->fresh()->tonerSupplies()->first();
+        $supply = $printer->fresh()->tonerSupplies()->first();
 
         $service->syncFromDiscovery($printer->fresh(), $this->discovery([
             $this->unknownSupply('1', 'black', 'TK-5240K'),
@@ -105,15 +105,13 @@ class PrinterPollingServiceTest extends TestCase
 
         $printer->refresh();
         $active = $printer->tonerSupplies()->first();
-        $history = $printer->tonerHistory()->first();
 
-        $this->assertNotNull($active);
-        $this->assertNotNull($history);
-        $this->assertNotSame($oldSupply?->id, $active->id);
-        $this->assertSame($oldSupply?->id, $history->id);
-        $this->assertTrue($active->needs_identity_confirmation);
-        $this->assertFalse($active->is_known);
-        $this->assertNull($active->percentage);
+        $this->assertCount(1, $printer->tonerSupplies);
+        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame($supply?->id, $active?->id);
+        $this->assertFalse($active?->needs_identity_confirmation);
+        $this->assertTrue($active?->is_known);
+        $this->assertSame(45, $active?->percentage);
     }
 
     public function test_unknown_to_unknown_does_not_trigger_replacement(): void
@@ -136,6 +134,31 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertCount(1, $printer->tonerSupplies);
         $this->assertCount(0, $printer->tonerHistory);
         $this->assertSame($supply?->id, $printer->tonerSupplies()->first()?->id);
+        $this->assertFalse($printer->tonerSupplies()->first()?->needs_identity_confirmation);
+    }
+
+    public function test_transient_unknown_snmp_reading_preserves_known_toner_level(): void
+    {
+        $printer = $this->makePrinter('192.168.1.34');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('1', 'black', 'TK-5240K', 45),
+        ]));
+
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->unknownSupply('1', 'black', 'TK-5240K'),
+        ]));
+
+        $service->syncFromDiscovery($printer->fresh(), $this->discovery([
+            $this->supply('1', 'black', 'TK-5240K', 44),
+        ]));
+
+        $printer->refresh();
+
+        $this->assertCount(1, $printer->tonerSupplies);
+        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame(44, $printer->tonerSupplies()->first()?->percentage);
         $this->assertFalse($printer->tonerSupplies()->first()?->needs_identity_confirmation);
     }
 
