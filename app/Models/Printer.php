@@ -112,6 +112,28 @@ class Printer extends Model
     }
 
     /**
+     * @return array<int, array{slot_key: string}>
+     */
+    public function getAwaitingSlotPlaceholdersAttribute(): array
+    {
+        $activeSlots = $this->displayed_toner_supplies
+            ->pluck('slot_key')
+            ->filter()
+            ->all();
+
+        return collect($this->awaiting_slot_poll_keys ?? [])
+            ->filter(fn (mixed $slotKey): bool => is_string($slotKey) && $slotKey !== '')
+            ->reject(fn (string $slotKey): bool => in_array($slotKey, $activeSlots, true))
+            ->sortBy(fn (string $slotKey): array => [
+                TonerSupply::slotSortValue($slotKey),
+                $slotKey,
+            ])
+            ->map(fn (string $slotKey): array => ['slot_key' => $slotKey])
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return array<int, array{type: string, supply?: TonerSupply, slot_key: string}>
      */
     public function getOrderedTonerDisplayItemsAttribute(): array

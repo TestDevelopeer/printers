@@ -1,9 +1,5 @@
 @php
-    $record = $getRecord();
-    $supply = $record instanceof \App\Models\TonerSupply
-        ? $record
-        : (is_array($record) ? ($record['supply'] ?? null) : null);
-    $percentage = $supply?->percentage;
+    $percentage = $getRecord()->percentage;
 @endphp
 
 <div class="space-y-2">
