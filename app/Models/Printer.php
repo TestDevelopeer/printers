@@ -32,6 +32,7 @@ class Printer extends Model
         'last_error',
         'is_active',
         'is_polling',
+        'awaiting_slot_poll_keys',
     ];
 
     protected function casts(): array
@@ -43,6 +44,7 @@ class Printer extends Model
             'manual_poll_requested_at' => 'datetime',
             'is_active' => 'boolean',
             'is_polling' => 'boolean',
+            'awaiting_slot_poll_keys' => 'array',
         ];
     }
 
@@ -107,6 +109,64 @@ class Printer extends Model
             : $this->tonerHistory()->get();
 
         return TonerSupply::sortByInstallationSlot($supplies, preferHistorySlot: true);
+    }
+
+    /**
+     * @return array<int, array{type: string, supply?: TonerSupply, slot_key: string}>
+     */
+    public function getOrderedTonerDisplayItemsAttribute(): array
+    {
+        $activeBySlot = $this->displayed_toner_supplies->keyBy('slot_key');
+        $awaitingSlots = collect($this->awaiting_slot_poll_keys ?? [])
+            ->filter(fn (mixed $slotKey): bool => is_string($slotKey) && $slotKey !== '')
+            ->reject(fn (string $slotKey): bool => $activeBySlot->has($slotKey))
+            ->values();
+
+        $slotKeys = $activeBySlot->keys()
+            ->merge($awaitingSlots)
+            ->unique()
+            ->sortBy(fn (string $slotKey): array => [
+                TonerSupply::slotSortValue($slotKey),
+                $slotKey,
+            ])
+            ->values();
+
+        return $slotKeys
+            ->map(function (string $slotKey) use ($activeBySlot): array {
+                if ($activeBySlot->has($slotKey)) {
+                    return [
+                        'type' => 'supply',
+                        'slot_key' => $slotKey,
+                        'supply' => $activeBySlot->get($slotKey),
+                    ];
+                }
+
+                return [
+                    'type' => 'placeholder',
+                    'slot_key' => $slotKey,
+                ];
+            })
+            ->all();
+    }
+
+    public function addAwaitingSlotPollKey(string $slotKey): void
+    {
+        $keys = $this->awaiting_slot_poll_keys ?? [];
+
+        if (! in_array($slotKey, $keys, true)) {
+            $keys[] = $slotKey;
+            $this->forceFill(['awaiting_slot_poll_keys' => $keys])->save();
+        }
+    }
+
+    public function removeAwaitingSlotPollKey(string $slotKey): void
+    {
+        $keys = array_values(array_filter(
+            $this->awaiting_slot_poll_keys ?? [],
+            static fn (string $key): bool => $key !== $slotKey,
+        ));
+
+        $this->forceFill(['awaiting_slot_poll_keys' => $keys])->save();
     }
 
     public function getTonerSummaryAttribute(): string

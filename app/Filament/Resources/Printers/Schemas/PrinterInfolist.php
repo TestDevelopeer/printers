@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Printers\Schemas;
 
+use App\Filament\Support\ManualPrinterPoll;
 use App\Enums\TonerColor;
 use App\Models\Printer;
 use App\Models\TonerSupply;
@@ -21,6 +22,7 @@ use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use InvalidArgumentException;
+use Throwable;
 
 class PrinterInfolist
 {
@@ -50,9 +52,9 @@ class PrinterInfolist
                 Section::make('Тонеры')
                     ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->schema([
-                        RepeatableEntry::make('displayed_toner_supplies')
+                        RepeatableEntry::make('ordered_toner_display_items')
                             ->label('')
-                            ->state(fn (Printer $record) => $record->displayed_toner_supplies)
+                            ->state(fn (Printer $record): array => $record->ordered_toner_display_items)
                             ->contained(true)
                             ->placeholder('Активные картриджи не найдены')
                             ->schema([
@@ -61,39 +63,57 @@ class PrinterInfolist
                                         ->label('Слот')
                                         ->badge()
                                         ->color('gray'),
-                                    TextEntry::make('color_label')
+                                    TextEntry::make('placeholder_status')
+                                        ->label('Статус')
+                                        ->state('Ожидает опроса')
+                                        ->badge()
+                                        ->color('gray')
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'placeholder'),
+                                    TextEntry::make('supply.color_label')
                                         ->label('Цвет')
                                         ->badge()
-                                        ->state(fn (TonerSupply $record): string => $record->color_label)
-                                        ->color(fn (TonerSupply $record): string => $record->color_badge_color),
-                                    TextEntry::make('status_label')
+                                        ->color(fn (array $state): string => ($state['supply'] ?? null)?->color_badge_color ?? 'gray')
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply'),
+                                    TextEntry::make('supply.status_label')
                                         ->label('Статус')
-                                        ->state(fn (TonerSupply $record): string => $record->status_label)
                                         ->badge()
-                                        ->color(fn (TonerSupply $record): string => $record->isLow() ? 'danger' : ($record->percentage === null ? 'warning' : 'success')),
-                                    TextEntry::make('identity_pending')
+                                        ->color(fn (array $state): string => ($state['supply'] ?? null)?->isLow() ? 'danger' : ((($state['supply'] ?? null)?->percentage === null) ? 'warning' : 'success'))
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply'),
+                                    TextEntry::make('supply.identity_pending')
                                         ->label('Подтверждение')
-                                        ->state(fn (TonerSupply $record): string => 'Картридж заменён — выберите из истории')
+                                        ->state('Картридж заменён — выберите из истории')
                                         ->badge()
                                         ->color('warning')
-                                        ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation),
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply' && ($state['supply'] ?? null)?->needs_identity_confirmation),
                                     Actions::make([
                                         self::chooseCartridgeIdentityAction(),
                                     ])
-                                        ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation),
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply' && ($state['supply'] ?? null)?->needs_identity_confirmation),
+                                    Actions::make([
+                                        self::refreshPrinterAction(),
+                                    ])
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'placeholder'),
                                 ])->columnSpan(1),
                                 Group::make([
-                                    TextEntry::make('display_name')
-                                        ->label('Название'),
-                                    TextEntry::make('id')
-                                        ->label('ID в базе'),
-                                    ViewEntry::make('percentage')
+                                    TextEntry::make('placeholder_hint')
+                                        ->label('Слот')
+                                        ->state('Картридж отправлен на обслуживание. Выполните опрос принтера, чтобы подтянуть новый картридж.')
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'placeholder'),
+                                    TextEntry::make('supply.display_name')
+                                        ->label('Название')
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply'),
+                                    TextEntry::make('supply.id')
+                                        ->label('ID в базе')
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply'),
+                                    ViewEntry::make('supply.percentage')
                                         ->label('% тонера')
-                                        ->view('filament.infolists.entries.toner-progress'),
-                                    TextEntry::make('comment_display')
+                                        ->view('filament.infolists.entries.toner-progress')
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply'),
+                                    TextEntry::make('supply.comment_display')
                                         ->label('Комментарий')
                                         ->placeholder('Без комментария')
-                                        ->suffixAction(self::editSupplyMetadataAction('edit_active_supply_metadata')),
+                                        ->suffixAction(self::editSupplyMetadataAction('edit_active_supply_metadata'))
+                                        ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply'),
                                 ])->columnSpan(1),
                             ])
                             ->columns(2),
@@ -192,7 +212,7 @@ class PrinterInfolist
             ->size('sm')
             ->modalHeading('Выбор картриджа для слота')
             ->modalDescription('Выберите картридж из истории этого слота или сохраните текущий как новый.')
-            ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation)
+            ->visible(fn (array $state): bool => ($state['type'] ?? '') === 'supply' && ($state['supply'] ?? null)?->needs_identity_confirmation)
             ->schema([
                 Select::make('choice_type')
                     ->label('Действие')
@@ -205,7 +225,13 @@ class PrinterInfolist
                     ->live(),
                 Select::make('historical_supply_id')
                     ->label('Картридж из истории')
-                    ->options(function (TonerSupply $record): array {
+                    ->options(function (array $state): array {
+                        $record = $state['supply'] ?? null;
+
+                        if (! $record instanceof TonerSupply) {
+                            return [];
+                        }
+
                         return app(TonerSupplyIdentityService::class)
                             ->slotHistory($record->printer, (string) $record->slot_key)
                             ->mapWithKeys(fn (TonerSupply $supply): array => [
@@ -226,7 +252,13 @@ class PrinterInfolist
                     ->visible(fn (Get $get): bool => $get('choice_type') === 'new')
                     ->required(fn (Get $get): bool => $get('choice_type') === 'new'),
             ])
-            ->action(function (TonerSupply $record, array $data): void {
+            ->action(function (array $state, array $data): void {
+                $record = $state['supply'] ?? null;
+
+                if (! $record instanceof TonerSupply) {
+                    throw new InvalidArgumentException('Не удалось определить картридж.');
+                }
+
                 $printer = $record->printer;
 
                 if (! $printer instanceof Printer || $record->slot_key === null) {
@@ -255,6 +287,44 @@ class PrinterInfolist
                     ->title('Картридж для слота подтверждён')
                     ->success()
                     ->send();
+            });
+    }
+
+    private static function refreshPrinterAction(): Action
+    {
+        return Action::make('refresh_printer_for_slot')
+            ->button()
+            ->icon('heroicon-m-arrow-path')
+            ->label('Обновить принтер')
+            ->color('primary')
+            ->size('sm')
+            ->disabled(function ($livewire): bool {
+                $record = $livewire->getRecord();
+
+                return $record instanceof Printer && (bool) $record->is_polling;
+            })
+            ->action(function ($livewire): void {
+                $record = $livewire->getRecord();
+
+                if (! $record instanceof Printer) {
+                    throw new InvalidArgumentException('Не удалось определить принтер.');
+                }
+
+                try {
+                    ManualPrinterPoll::run($record);
+
+                    Notification::make()
+                        ->title('Опрос выполнен')
+                        ->body("Принтер {$record->display_name} опрошен.")
+                        ->success()
+                        ->send();
+                } catch (Throwable $exception) {
+                    Notification::make()
+                        ->title('Ошибка опроса')
+                        ->body($exception->getMessage())
+                        ->danger()
+                        ->send();
+                }
             });
     }
 
@@ -296,17 +366,51 @@ class PrinterInfolist
                     ->label('Комментарий')
                     ->rows(3),
             ])
-            ->fillForm(fn (TonerSupply $record): array => [
-                'color' => $record->color?->value ?? TonerColor::Unknown->value,
-                'comment' => $record->comment,
-                'is_on_service' => $record->is_on_service,
-            ])
-            ->action(function (TonerSupply $record, array $data): void {
-                $record->update([
+            ->fillForm(function (array|TonerSupply $record): array {
+                $supply = $record instanceof TonerSupply ? $record : ($record['supply'] ?? null);
+
+                if (! $supply instanceof TonerSupply) {
+                    return [];
+                }
+
+                return [
+                    'color' => $supply->color?->value ?? TonerColor::Unknown->value,
+                    'comment' => $supply->comment,
+                    'is_on_service' => $supply->is_on_service,
+                ];
+            })
+            ->visible(fn (array|TonerSupply $record): bool => $record instanceof TonerSupply
+                || (($record['type'] ?? '') === 'supply' && ($record['supply'] ?? null) instanceof TonerSupply))
+            ->action(function (array|TonerSupply $record, array $data): void {
+                $supply = $record instanceof TonerSupply ? $record : ($record['supply'] ?? null);
+
+                if (! $supply instanceof TonerSupply) {
+                    throw new InvalidArgumentException('Не удалось определить картридж.');
+                }
+
+                $willBeOnService = (bool) ($data['is_on_service'] ?? false);
+
+                if ($supply->removed_at === null && $willBeOnService && ! $supply->is_on_service) {
+                    app(TonerSupplyIdentityService::class)->sendActiveToService(
+                        $supply,
+                        $data['color'],
+                        filled($data['comment'] ?? null) ? trim((string) $data['comment']) : null,
+                    );
+
+                    Notification::make()
+                        ->title('Картридж отправлен на обслуживание')
+                        ->body('Слот ожидает опроса принтера. Нажмите «Обновить принтер», чтобы подтянуть новый картридж.')
+                        ->success()
+                        ->send();
+
+                    return;
+                }
+
+                $supply->update([
                     'color' => $data['color'],
                     'is_color_manual' => true,
                     'comment' => filled($data['comment'] ?? null) ? trim((string) $data['comment']) : null,
-                    'is_on_service' => (bool) ($data['is_on_service'] ?? false),
+                    'is_on_service' => $willBeOnService,
                 ]);
 
                 Notification::make()

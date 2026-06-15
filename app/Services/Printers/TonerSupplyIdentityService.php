@@ -27,6 +27,42 @@ class TonerSupplyIdentityService
             ->get();
     }
 
+    public function sendActiveToService(TonerSupply $supply, ?string $color = null, ?string $comment = null): void
+    {
+        if ($supply->removed_at !== null) {
+            throw new InvalidArgumentException('Картридж уже находится в истории.');
+        }
+
+        if ($supply->slot_key === null) {
+            throw new InvalidArgumentException('Не удалось определить слот картриджа.');
+        }
+
+        $printer = $supply->printer;
+
+        if (! $printer instanceof Printer) {
+            throw new InvalidArgumentException('Не удалось определить принтер картриджа.');
+        }
+
+        DB::transaction(function () use ($supply, $color, $comment, $printer): void {
+            $slotKey = (string) $supply->slot_key;
+
+            if ($color !== null) {
+                $supply->color = $color;
+                $supply->is_color_manual = true;
+            }
+
+            if ($comment !== null) {
+                $supply->comment = filled($comment) ? trim($comment) : null;
+            }
+
+            $supply->save();
+
+            $this->moveSupplyToHistory($supply, $slotKey);
+
+            $printer->addAwaitingSlotPollKey($slotKey);
+        });
+    }
+
     public function selectFromHistory(Printer $printer, string $slotKey, TonerSupply $historicalSupply): TonerSupply
     {
         return DB::transaction(function () use ($printer, $slotKey, $historicalSupply): TonerSupply {

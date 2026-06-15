@@ -297,6 +297,12 @@ class PrinterPollingService
                 }
             });
 
+        foreach ($snmpSlotKeys as $slotKey) {
+            if ($this->findActiveSupplyBySlot($existing, $slotKey) !== null) {
+                $printer->removeAwaitingSlotPollKey($slotKey);
+            }
+        }
+
         return ['replacements' => $detectedReplacements];
     }
 

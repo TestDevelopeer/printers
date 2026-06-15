@@ -2,8 +2,9 @@
 
 namespace App\Filament\Resources\Printers\Pages;
 
-use App\Filament\Resources\Printers\PrinterResource;
+use App\Filament\Support\ManualPrinterPoll;
 use App\Jobs\PollPrinterJob;
+use App\Filament\Resources\Printers\PrinterResource;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
@@ -30,13 +31,8 @@ class ViewPrinter extends ViewRecord
                 ->color(fn (): string => $this->record->is_polling ? 'warning' : 'gray')
                 ->disabled(fn (): bool => (bool) $this->record->is_polling)
                 ->action(function (): void {
-                    $this->record->forceFill([
-                        'is_polling' => true,
-                        'manual_poll_requested_at' => now(),
-                    ])->save();
-
                     try {
-                        PollPrinterJob::dispatchSync($this->record->id, 'manual');
+                        ManualPrinterPoll::run($this->record);
 
                         Notification::make()
                             ->title('Опрос выполнен')
