@@ -8,6 +8,7 @@ use App\Models\Printer;
 use App\Models\TonerSupply;
 use App\Services\Printers\TonerSupplyIdentityService;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
@@ -117,6 +118,7 @@ class PrinterInfolist
                                         ->color('gray'),
                                     Actions::make([
                                         self::refreshPrinterAction(),
+                                        self::chooseCartridgeForAwaitingSlotAction(),
                                     ]),
                                 ])->columnSpan(1),
                                 Group::make([
@@ -287,6 +289,82 @@ class PrinterInfolist
             });
     }
 
+    private static function chooseCartridgeForAwaitingSlotAction(): Action
+    {
+        return Action::make('choose_cartridge_for_awaiting_slot')
+            ->button()
+            ->icon('heroicon-m-queue-list')
+            ->label('Выбрать картридж')
+            ->color('warning')
+            ->size('sm')
+            ->modalHeading('Выбор картриджа для слота')
+            ->modalDescription('Выберите картридж из истории этого слота и установите его активным.')
+            ->fillForm(fn (array $record): array => [
+                'slot_key' => (string) ($record['slot_key'] ?? ''),
+            ])
+            ->schema([
+                Hidden::make('slot_key'),
+                Select::make('historical_supply_id')
+                    ->label('Картридж из истории')
+                    ->options(function (Get $get, $livewire): array {
+                        $printer = $livewire->getRecord();
+
+                        if (! $printer instanceof Printer) {
+                            return [];
+                        }
+
+                        $slotKey = (string) $get('slot_key');
+
+                        if ($slotKey === '') {
+                            return [];
+                        }
+
+                        return app(TonerSupplyIdentityService::class)
+                            ->slotHistory($printer, $slotKey)
+                            ->mapWithKeys(fn (TonerSupply $supply): array => [
+                                $supply->getKey() => sprintf(
+                                    '#%d — %s — %s',
+                                    $supply->getKey(),
+                                    $supply->display_name,
+                                    $supply->comment_display,
+                                ),
+                            ])
+                            ->all();
+                    })
+                    ->required(),
+            ])
+            ->action(function (array $data, $livewire): void {
+                $printer = $livewire->getRecord();
+
+                if (! $printer instanceof Printer) {
+                    throw new InvalidArgumentException('Не удалось определить принтер.');
+                }
+
+                $slotKey = (string) ($data['slot_key'] ?? '');
+
+                if ($slotKey === '') {
+                    throw new InvalidArgumentException('Не удалось определить слот.');
+                }
+
+                $historical = TonerSupply::query()->find($data['historical_supply_id'] ?? null);
+
+                if (! $historical instanceof TonerSupply) {
+                    throw new InvalidArgumentException('Картридж из истории не найден.');
+                }
+
+                app(TonerSupplyIdentityService::class)->activateFromHistory(
+                    $printer,
+                    $slotKey,
+                    $historical,
+                );
+
+                Notification::make()
+                    ->title('Картридж установлен в слот')
+                    ->success()
+                    ->send();
+            });
+    }
+
     private static function refreshPrinterAction(): Action
     {
         return Action::make('refresh_printer_for_slot')
@@ -392,6 +470,30 @@ class PrinterInfolist
                     Notification::make()
                         ->title('Картридж отправлен на обслуживание')
                         ->body('Слот ожидает опроса принтера. Нажмите «Обновить принтер», чтобы подтянуть новый картридж.')
+                        ->success()
+                        ->send();
+
+                    return;
+                }
+
+                if ($record->removed_at !== null && $record->is_on_service && ! $willBeOnService) {
+                    $slotKey = (string) ($record->history_slot_key ?? $record->slot_key ?? '');
+
+                    if ($slotKey === '' || ! $record->printer instanceof Printer) {
+                        throw new InvalidArgumentException('Не удалось определить принтер или слот.');
+                    }
+
+                    app(TonerSupplyIdentityService::class)->activateFromHistory(
+                        $record->printer,
+                        $slotKey,
+                        $record,
+                        $data['color'],
+                        filled($data['comment'] ?? null) ? trim((string) $data['comment']) : null,
+                    );
+
+                    Notification::make()
+                        ->title('Картридж возвращён в слот')
+                        ->body('Текущий активный картридж этого слота перемещён в историю.')
                         ->success()
                         ->send();
 

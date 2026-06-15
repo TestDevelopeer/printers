@@ -63,6 +63,60 @@ class TonerSupplyIdentityService
         });
     }
 
+    public function activateFromHistory(
+        Printer $printer,
+        string $slotKey,
+        TonerSupply $historicalSupply,
+        ?string $color = null,
+        ?string $comment = null,
+    ): TonerSupply {
+        return DB::transaction(function () use ($printer, $slotKey, $historicalSupply, $color, $comment): TonerSupply {
+            if ($historicalSupply->printer_id !== $printer->getKey() || $historicalSupply->removed_at === null) {
+                throw new InvalidArgumentException('Выбранный картридж не найден в истории этого принтера.');
+            }
+
+            $historicalSlot = (string) ($historicalSupply->history_slot_key ?? $historicalSupply->slot_key ?? '');
+
+            if ($historicalSlot !== $slotKey) {
+                throw new InvalidArgumentException('Картридж не относится к выбранному слоту.');
+            }
+
+            $activeSupply = $this->findActiveSupplyBySlot($printer, $slotKey);
+
+            if ($activeSupply !== null && $activeSupply->is($historicalSupply)) {
+                throw new InvalidArgumentException('Картридж уже установлен в этом слоте.');
+            }
+
+            if ($activeSupply !== null) {
+                $this->moveSupplyToHistory($activeSupply, $slotKey, isOnService: false);
+            }
+
+            if ($color !== null) {
+                $historicalSupply->color = $color;
+                $historicalSupply->is_color_manual = true;
+            }
+
+            if ($comment !== null) {
+                $historicalSupply->comment = filled($comment) ? trim($comment) : null;
+            }
+
+            $historicalSupply->forceFill([
+                'slot_key' => $slotKey,
+                'removed_at' => null,
+                'history_slot_key' => null,
+                'needs_identity_confirmation' => false,
+                'replacement_detected_at' => null,
+                'installed_at' => $historicalSupply->installed_at ?? Carbon::now(),
+                'last_seen_at' => Carbon::now(),
+                'is_on_service' => false,
+            ])->save();
+
+            $printer->removeAwaitingSlotPollKey($slotKey);
+
+            return $historicalSupply->fresh();
+        });
+    }
+
     public function selectFromHistory(Printer $printer, string $slotKey, TonerSupply $historicalSupply): TonerSupply
     {
         return DB::transaction(function () use ($printer, $slotKey, $historicalSupply): TonerSupply {
@@ -130,6 +184,15 @@ class TonerSupplyIdentityService
         });
     }
 
+    private function findActiveSupplyBySlot(Printer $printer, string $slotKey): ?TonerSupply
+    {
+        return TonerSupply::query()
+            ->where('printer_id', $printer->getKey())
+            ->where('slot_key', $slotKey)
+            ->whereNull('removed_at')
+            ->first();
+    }
+
     private function findActiveProvisionalSupply(Printer $printer, string $slotKey): ?TonerSupply
     {
         return TonerSupply::query()
@@ -140,12 +203,12 @@ class TonerSupplyIdentityService
             ->first();
     }
 
-    private function moveSupplyToHistory(TonerSupply $supply, string $slotKey): void
+    private function moveSupplyToHistory(TonerSupply $supply, string $slotKey, bool $isOnService = true): void
     {
         $supply->forceFill([
             'removed_at' => Carbon::now(),
             'history_slot_key' => $slotKey,
-            'is_on_service' => true,
+            'is_on_service' => $isOnService,
             'needs_identity_confirmation' => false,
             'replacement_detected_at' => null,
         ])->save();
