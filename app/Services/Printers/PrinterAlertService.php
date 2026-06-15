@@ -19,8 +19,7 @@ class PrinterAlertService
 
     public function __construct(
         private readonly TelegramBotService $telegramBotService,
-    ) {
-    }
+    ) {}
 
     /**
      * @param  array<string, bool>  $previousLowTonerStates
@@ -65,8 +64,8 @@ class PrinterAlertService
             implode("\n", array_filter([
                 '🔄 Заменён картридж',
                 "🖨️ Принтер: {$printer->display_name}",
+                ...$this->formatCartridgeContext($printer, $provisionalSupply, $slotKey),
                 "🌐 IP: {$printer->ip_address}",
-                "🧩 Слот: {$slotKey}",
                 '🎨 Картридж: '.$this->formatSupplyLabel(
                     $provisionalSupply->color_label,
                     $provisionalSupply->snmp_description,
@@ -210,6 +209,7 @@ class PrinterAlertService
         return implode("\n", [
             '🟡 Низкий уровень тонера',
             "🖨️ Принтер: {$printer->display_name}",
+            ...$this->formatCartridgeContext($printer, $supply),
             "🌐 IP: {$printer->ip_address}",
             '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
             "📉 Остаток: {$supply->percentage_display}",
@@ -221,10 +221,25 @@ class PrinterAlertService
         return implode("\n", [
             '🟢 Тонер восстановился',
             "🖨️ Принтер: {$printer->display_name}",
+            ...$this->formatCartridgeContext($printer, $supply),
             "🌐 IP: {$printer->ip_address}",
             '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
             "📈 Текущий уровень: {$supply->percentage_display}",
         ]);
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function formatCartridgeContext(Printer $printer, TonerSupply $supply, ?string $slotKey = null): array
+    {
+        $slot = $slotKey ?? $supply->slot_key ?? '—';
+
+        return [
+            "🆔 Принтер: #{$printer->getKey()}",
+            "🧩 Слот: {$slot}",
+            "🆔 Картридж: #{$supply->getKey()}",
+        ];
     }
 
     private function formatSupplyLabel(string $color, ?string $description): string

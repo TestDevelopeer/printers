@@ -6,6 +6,7 @@ use App\Enums\PrinterStatus;
 use App\Models\Printer;
 use App\Services\Notifications\TelegramBotService;
 use App\Services\Printers\Data\DiscoveredPrinterData;
+use App\Services\Printers\Data\SnmpDiscoveryResult;
 use App\Services\Printers\PrinterAlertService;
 use App\Services\Printers\PrinterPollingService;
 use App\Services\Printers\PrinterSnmpService;
@@ -39,6 +40,9 @@ class PrinterAlertsTest extends TestCase
 
         Http::assertSentCount(1);
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Низкий уровень тонера'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], '🆔 Принтер: #'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], '🧩 Слот: 1'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], '🆔 Картридж: #'));
     }
 
     public function test_it_sends_recovered_toner_notification_without_replacement_duplicate(): void
@@ -85,14 +89,14 @@ class PrinterAlertsTest extends TestCase
                 ?string $community = null,
                 ?int $timeoutMs = null,
                 ?array $probe = null,
-            ): \App\Services\Printers\Data\SnmpDiscoveryResult {
+            ): SnmpDiscoveryResult {
                 throw new RuntimeException('timeout');
             }
         };
 
         $service = new PrinterPollingService(
             $snmpService,
-            new PrinterAlertService(new TelegramBotService()),
+            new PrinterAlertService(new TelegramBotService),
         );
 
         $service->poll($printer);
@@ -120,6 +124,9 @@ class PrinterAlertsTest extends TestCase
         Http::assertSentCount(1);
         Http::assertSent(fn ($request) => str_contains($request['text'], 'Заменён картридж'));
         Http::assertSent(fn ($request) => str_contains($request['text'], 'TK-5240Y'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], '🆔 Принтер: #'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], '🧩 Слот: 1'));
+        Http::assertSent(fn ($request) => str_contains($request['text'], '🆔 Картридж: #'));
         Http::assertSent(fn ($request) => ! str_contains($request['text'], 'Тонер восстановился'));
     }
 
@@ -201,8 +208,8 @@ class PrinterAlertsTest extends TestCase
     private function makeService(): PrinterPollingService
     {
         return new PrinterPollingService(
-            new PrinterSnmpService(),
-            new PrinterAlertService(new TelegramBotService()),
+            new PrinterSnmpService,
+            new PrinterAlertService(new TelegramBotService),
         );
     }
 
