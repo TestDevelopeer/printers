@@ -26,14 +26,31 @@ class TonerHistoryReport extends Page
      */
     public array $selectedSupplies = [];
 
+    public bool $serviceOnly = false;
+
     public function getHistorySuppliesProperty(): EloquentCollection
     {
         return TonerSupply::query()
             ->inHistory()
+            ->when($this->serviceOnly, fn ($query) => $query->where('is_on_service', true))
             ->with('printer')
             ->orderByDesc('removed_at')
             ->orderByDesc('id')
             ->get();
+    }
+
+    public function updatedServiceOnly(): void
+    {
+        $visibleIds = $this->historySupplies
+            ->pluck('id')
+            ->map(fn ($id): int => (int) $id)
+            ->all();
+
+        $this->selectedSupplies = collect($this->selectedSupplies)
+            ->map(fn ($id): int => (int) $id)
+            ->filter(fn (int $id): bool => in_array($id, $visibleIds, true))
+            ->values()
+            ->all();
     }
 
     public function generateReport(TonerHistoryReportPdfService $pdfService): ?StreamedResponse
@@ -57,6 +74,7 @@ class TonerHistoryReport extends Page
 
         $supplies = TonerSupply::query()
             ->inHistory()
+            ->when($this->serviceOnly, fn ($query) => $query->where('is_on_service', true))
             ->whereIn('id', $ids)
             ->with('printer')
             ->orderByDesc('removed_at')

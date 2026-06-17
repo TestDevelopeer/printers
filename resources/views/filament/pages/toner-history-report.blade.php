@@ -102,9 +102,18 @@
                             Выберите позиции для включения в PDF-отчет. В отчете добавляются колонки «Подпись получателя» и «Подпись владельца».
                         </div>
                     </div>
-                    <x-filament::button wire:click="generateReport" color="primary">
-                        Сформировать отчет
-                    </x-filament::button>
+                    <div class="flex items-center gap-4">
+                        <label class="inline-flex items-center gap-2 text-sm">
+                            <input
+                                type="checkbox"
+                                wire:model.live="serviceOnly"
+                            >
+                            <span>На обслуживании</span>
+                        </label>
+                        <x-filament::button wire:click="generateReport" color="primary">
+                            Сформировать отчет
+                        </x-filament::button>
+                    </div>
                 </div>
 
                 <div class="toner-report__table-wrap">

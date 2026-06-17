@@ -12,6 +12,7 @@ use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -448,6 +449,14 @@ class PrinterInfolist
                     ->required(),
                 Toggle::make('is_on_service')
                     ->label('Отправлен на обслуживание'),
+                TextInput::make('percentage')
+                    ->label('% тонера')
+                    ->numeric()
+                    ->minValue(0)
+                    ->maxValue(100)
+                    ->step(1)
+                    ->suffix('%')
+                    ->helperText('Ручное значение сохраняется до следующего опроса принтера.'),
                 Textarea::make('comment')
                     ->label('Комментарий')
                     ->rows(3),
@@ -456,15 +465,20 @@ class PrinterInfolist
                 'color' => $record->color?->value ?? TonerColor::Unknown->value,
                 'comment' => $record->comment,
                 'is_on_service' => $record->is_on_service,
+                'percentage' => $record->percentage,
             ])
             ->action(function (TonerSupply $record, array $data): void {
                 $willBeOnService = (bool) ($data['is_on_service'] ?? false);
+                $manualPercentage = array_key_exists('percentage', $data)
+                    ? (is_numeric($data['percentage']) ? (int) $data['percentage'] : null)
+                    : $record->percentage;
 
                 if ($record->removed_at === null && $willBeOnService && ! $record->is_on_service) {
                     app(TonerSupplyIdentityService::class)->sendActiveToService(
                         $record,
                         $data['color'],
                         filled($data['comment'] ?? null) ? trim((string) $data['comment']) : null,
+                        $manualPercentage,
                     );
 
                     Notification::make()
@@ -489,6 +503,7 @@ class PrinterInfolist
                         $record,
                         $data['color'],
                         filled($data['comment'] ?? null) ? trim((string) $data['comment']) : null,
+                        $manualPercentage,
                     );
 
                     Notification::make()
@@ -505,6 +520,7 @@ class PrinterInfolist
                     'is_color_manual' => true,
                     'comment' => filled($data['comment'] ?? null) ? trim((string) $data['comment']) : null,
                     'is_on_service' => $willBeOnService,
+                    'percentage' => $manualPercentage,
                 ]);
 
                 Notification::make()

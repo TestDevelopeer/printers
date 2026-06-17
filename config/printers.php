@@ -2,6 +2,7 @@
 
 return [
     'low_toner_threshold' => (int) env('PRINTERS_LOW_TONER_THRESHOLD', 15),
+    'critical_low_toner_threshold' => (int) env('PRINTERS_CRITICAL_LOW_TONER_THRESHOLD', 5),
     'replacement_detection_min_increase' => (int) env('PRINTERS_REPLACEMENT_DETECTION_MIN_INCREASE', 3),
     'default_snmp_community' => env('PRINTERS_DEFAULT_SNMP_COMMUNITY', 'public'),
     'default_snmp_version' => env('PRINTERS_DEFAULT_SNMP_VERSION', '2c'),

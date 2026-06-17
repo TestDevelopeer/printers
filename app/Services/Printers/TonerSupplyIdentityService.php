@@ -27,7 +27,12 @@ class TonerSupplyIdentityService
             ->get();
     }
 
-    public function sendActiveToService(TonerSupply $supply, ?string $color = null, ?string $comment = null): void
+    public function sendActiveToService(
+        TonerSupply $supply,
+        ?string $color = null,
+        ?string $comment = null,
+        ?int $percentage = null,
+    ): void
     {
         if ($supply->removed_at !== null) {
             throw new InvalidArgumentException('Картридж уже находится в истории.');
@@ -43,7 +48,7 @@ class TonerSupplyIdentityService
             throw new InvalidArgumentException('Не удалось определить принтер картриджа.');
         }
 
-        DB::transaction(function () use ($supply, $color, $comment, $printer): void {
+        DB::transaction(function () use ($supply, $color, $comment, $percentage, $printer): void {
             $slotKey = (string) $supply->slot_key;
 
             if ($color !== null) {
@@ -53,6 +58,10 @@ class TonerSupplyIdentityService
 
             if ($comment !== null) {
                 $supply->comment = filled($comment) ? trim($comment) : null;
+            }
+
+            if ($percentage !== null) {
+                $supply->percentage = $percentage;
             }
 
             $supply->save();
@@ -69,8 +78,9 @@ class TonerSupplyIdentityService
         TonerSupply $historicalSupply,
         ?string $color = null,
         ?string $comment = null,
+        ?int $percentage = null,
     ): TonerSupply {
-        return DB::transaction(function () use ($printer, $slotKey, $historicalSupply, $color, $comment): TonerSupply {
+        return DB::transaction(function () use ($printer, $slotKey, $historicalSupply, $color, $comment, $percentage): TonerSupply {
             if ($historicalSupply->printer_id !== $printer->getKey() || $historicalSupply->removed_at === null) {
                 throw new InvalidArgumentException('Выбранный картридж не найден в истории этого принтера.');
             }
@@ -98,6 +108,10 @@ class TonerSupplyIdentityService
 
             if ($comment !== null) {
                 $historicalSupply->comment = filled($comment) ? trim($comment) : null;
+            }
+
+            if ($percentage !== null) {
+                $historicalSupply->percentage = $percentage;
             }
 
             $historicalSupply->forceFill([

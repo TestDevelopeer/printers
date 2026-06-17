@@ -22,7 +22,7 @@ class PrinterAlertService
     ) {}
 
     /**
-     * @param  array<string, bool>  $previousLowTonerStates
+     * @param  array<string, array{low: bool, critical: bool}>  $previousLowTonerStates
      * @param  array<int, array{slot_key: string, supply: TonerSupply}>  $detectedReplacements
      */
     public function dispatchAlerts(
@@ -121,7 +121,7 @@ class PrinterAlertService
     }
 
     /**
-     * @param  array<string, bool>  $previousLowTonerStates
+     * @param  array<string, array{low: bool, critical: bool}>  $previousLowTonerStates
      * @param  array<int, string>  $replacementSlotKeys
      */
     private function notifyLowTonerChanges(
@@ -134,31 +134,35 @@ class PrinterAlertService
                 continue;
             }
 
-            $currentState = $supply->isLow();
-            $previousState = $previousLowTonerStates[$supply->identity_key] ?? null;
+            $lowKey = $this->alertKey('low-toner', $printer->getKey(), $supply->identity_key);
+            $criticalKey = $this->alertKey('critical-low-toner', $printer->getKey(), $supply->identity_key);
+            $currentLowState = $supply->isLow();
+            $currentCriticalState = $this->isCriticalLow($supply);
+            $previousState = $previousLowTonerStates[$supply->identity_key] ?? ['low' => false, 'critical' => false];
 
-            if ($previousState === $currentState) {
-                continue;
-            }
-
-            if ($currentState) {
+            if ($currentLowState && ! $previousState['low']) {
                 Cache::forget($this->alertKey('toner-recovered', $printer->getKey(), $supply->identity_key));
-                $this->sendOnce(
-                    $this->alertKey('low-toner', $printer->getKey(), $supply->identity_key),
-                    self::LOW_TONER_TTL_SECONDS,
-                    $this->formatLowTonerMessage($printer, $supply),
-                );
-
-                continue;
+                $this->sendOnce($lowKey, self::LOW_TONER_TTL_SECONDS, $this->formatLowTonerMessage($printer, $supply));
             }
 
-            if ($previousState === true) {
-                Cache::forget($this->alertKey('low-toner', $printer->getKey(), $supply->identity_key));
+            if ($currentCriticalState && Cache::has($lowKey)) {
+                $this->sendOnce($criticalKey, self::LOW_TONER_TTL_SECONDS, $this->formatCriticalLowTonerMessage($printer, $supply));
+            }
+
+            if (! $currentLowState && $previousState['low']) {
+                Cache::forget($lowKey);
+                Cache::forget($criticalKey);
                 $this->sendOnce(
                     $this->alertKey('toner-recovered', $printer->getKey(), $supply->identity_key),
                     self::LOW_TONER_TTL_SECONDS,
                     $this->formatRecoveredTonerMessage($printer, $supply),
                 );
+
+                continue;
+            }
+
+            if (! $currentCriticalState) {
+                Cache::forget($criticalKey);
             }
         }
     }
@@ -226,6 +230,24 @@ class PrinterAlertService
             '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
             "📈 Текущий уровень: {$supply->percentage_display}",
         ]);
+    }
+
+    private function formatCriticalLowTonerMessage(Printer $printer, TonerSupply $supply): string
+    {
+        return implode("\n", [
+            '🔴 Критически низкий уровень тонера',
+            "🖨️ Принтер: {$printer->display_name}",
+            ...$this->formatCartridgeContext($printer, $supply),
+            "🌐 IP: {$printer->ip_address}",
+            '🎨 Картридж: '.$this->formatSupplyLabel($supply->color_label, $supply->snmp_description),
+            "📉 Остаток: {$supply->percentage_display}",
+        ]);
+    }
+
+    private function isCriticalLow(TonerSupply $supply): bool
+    {
+        return $supply->percentage !== null
+            && $supply->percentage <= config('printers.critical_low_toner_threshold', 5);
     }
 
     /**

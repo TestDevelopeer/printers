@@ -354,6 +354,10 @@ class PrinterPollingService
             'last_seen_at' => $now,
         ];
 
+        if ($supply->is_color_manual) {
+            unset($payload['color']);
+        }
+
         if (! $supply->is_color_manual) {
             $payload['color'] = $normalized['detected_color'];
         }
@@ -463,7 +467,7 @@ class PrinterPollingService
     }
 
     /**
-     * @return array<string, bool>
+     * @return array<string, array{low: bool, critical: bool}>
      */
     private function snapshotLowTonerStates(Printer $printer): array
     {
@@ -474,7 +478,16 @@ class PrinterPollingService
         return $printer->allTonerSupplies()
             ->whereNull('removed_at')
             ->get()
-            ->mapWithKeys(fn (TonerSupply $supply): array => [$supply->identity_key => $supply->isLow()])
+            ->mapWithKeys(function (TonerSupply $supply): array {
+                $criticalThreshold = (int) config('printers.critical_low_toner_threshold', 5);
+
+                return [
+                    $supply->identity_key => [
+                        'low' => $supply->isLow(),
+                        'critical' => $supply->percentage !== null && $supply->percentage <= $criticalThreshold,
+                    ],
+                ];
+            })
             ->all();
     }
 }
