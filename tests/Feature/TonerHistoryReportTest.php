@@ -17,6 +17,8 @@ class TonerHistoryReportTest extends TestCase
 {
     use RefreshDatabase;
 
+    private int $printerSequence = 90;
+
     public function test_report_page_renders(): void
     {
         $user = User::factory()->create();
@@ -52,6 +54,32 @@ class TonerHistoryReportTest extends TestCase
             ->assertFileDownloaded();
     }
 
+    public function test_service_only_filter_shows_only_service_supplies(): void
+    {
+        $user = User::factory()->create();
+        $serviceSupply = $this->createHistoricalSupply([
+            'snmp_description' => 'SERVICE',
+            'is_on_service' => true,
+        ]);
+        $regularSupply = $this->createHistoricalSupply([
+            'slot_key' => '2',
+            'history_slot_key' => '2',
+            'snmp_description' => 'REGULAR',
+            'is_on_service' => false,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(TonerHistoryReport::class)
+            ->assertSee('SERVICE')
+            ->assertSee('REGULAR')
+            ->set('serviceOnly', true)
+            ->assertSee('SERVICE')
+            ->assertDontSee('REGULAR');
+
+        $this->assertNotNull($serviceSupply->id);
+        $this->assertNotNull($regularSupply->id);
+    }
+
     public function test_pdf_service_renders_valid_document(): void
     {
         $supply = $this->createHistoricalSupply();
@@ -63,18 +91,23 @@ class TonerHistoryReportTest extends TestCase
         $this->assertStringContainsString('otchet-kartridzhi-', $service->filename());
     }
 
-    private function createHistoricalSupply(): TonerSupply
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    private function createHistoricalSupply(array $overrides = []): TonerSupply
     {
+        $printerIp = '192.168.1.'.(++$this->printerSequence);
+
         $printer = Printer::query()->create([
             'name' => 'Kyocera офис',
-            'ip_address' => '192.168.1.90',
+            'ip_address' => $printerIp,
             'snmp_community' => 'public',
             'snmp_version' => '2c',
             'status' => PrinterStatus::Online,
             'is_active' => true,
         ]);
 
-        return TonerSupply::query()->create([
+        return TonerSupply::query()->create(array_merge([
             'printer_id' => $printer->id,
             'slot_key' => '1',
             'history_slot_key' => '1',
@@ -83,7 +116,8 @@ class TonerHistoryReportTest extends TestCase
             'percentage' => 12,
             'is_known' => true,
             'comment' => 'Списать',
+            'is_on_service' => true,
             'removed_at' => now()->subDay(),
-        ]);
+        ], $overrides));
     }
 }

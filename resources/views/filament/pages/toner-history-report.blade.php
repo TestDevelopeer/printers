@@ -126,6 +126,7 @@
                                 <th class="col-slot">Слот</th>
                                 <th>Принтер</th>
                                 <th>Цвет</th>
+                                <th>Статус</th>
                                 <th>Комментарий</th>
                                 <th class="col-toner">% тонера</th>
                             </tr>
@@ -145,6 +146,7 @@
                                     <td class="col-slot">{{ $supply->display_slot }}</td>
                                     <td>{{ $supply->printer?->display_name ?? '—' }}</td>
                                     <td>{{ $supply->color_label }}</td>
+                                    <td>{{ $supply->removed_at === null ? 'Активный' : $supply->service_status_label }}</td>
                                     <td>{{ $supply->comment_display }}</td>
                                     <td class="col-toner">{{ $supply->percentage_display }}</td>
                                 </tr>

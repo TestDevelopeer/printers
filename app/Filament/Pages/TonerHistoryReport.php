@@ -8,6 +8,7 @@ use BackedEnum;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
@@ -30,18 +31,12 @@ class TonerHistoryReport extends Page
 
     public function getHistorySuppliesProperty(): EloquentCollection
     {
-        return TonerSupply::query()
-            ->inHistory()
-            ->when($this->serviceOnly, fn ($query) => $query->where('is_on_service', true))
-            ->with('printer')
-            ->orderByDesc('removed_at')
-            ->orderByDesc('id')
-            ->get();
+        return $this->historySuppliesQuery()->get();
     }
 
     public function updatedServiceOnly(): void
     {
-        $visibleIds = $this->historySupplies
+        $visibleIds = $this->historySuppliesQuery()
             ->pluck('id')
             ->map(fn ($id): int => (int) $id)
             ->all();
@@ -73,8 +68,7 @@ class TonerHistoryReport extends Page
         }
 
         $supplies = TonerSupply::query()
-            ->inHistory()
-            ->when($this->serviceOnly, fn ($query) => $query->where('is_on_service', true))
+            ->tap(fn (Builder $query) => $this->applyHistorySuppliesFilter($query))
             ->whereIn('id', $ids)
             ->with('printer')
             ->orderByDesc('removed_at')
@@ -96,5 +90,21 @@ class TonerHistoryReport extends Page
             $pdfService->filename(),
             ['Content-Type' => 'application/pdf'],
         );
+    }
+
+    private function historySuppliesQuery(): Builder
+    {
+        $query = TonerSupply::query()->inHistory();
+
+        return $this->applyHistorySuppliesFilter($query);
+    }
+
+    private function applyHistorySuppliesFilter(Builder $query): Builder
+    {
+        return $query
+            ->when($this->serviceOnly, fn (Builder $query) => $query->where('is_on_service', true))
+            ->with('printer')
+            ->orderByDesc('removed_at')
+            ->orderByDesc('id');
     }
 }
