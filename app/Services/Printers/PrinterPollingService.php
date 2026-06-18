@@ -55,6 +55,7 @@ class PrinterPollingService
                 $discovery->discovered,
                 $previousStatus,
                 $previousLowTonerStates,
+                $discovery->isPartialResponse,
             );
 
             return new PrinterPollResult(
@@ -103,11 +104,12 @@ class PrinterPollingService
         DiscoveredPrinterData $discovered,
         ?PrinterStatus $previousStatus = null,
         ?array $previousLowTonerStates = null,
+        bool $isPartialResponse = false,
     ): Printer {
         $previousStatus ??= $printer->status;
         $previousLowTonerStates ??= $this->snapshotLowTonerStates($printer);
 
-        $result = DB::transaction(function () use ($printer, $discovered): array {
+        $result = DB::transaction(function () use ($printer, $discovered, $isPartialResponse): array {
             $now = Carbon::now();
 
             $printer->fill(array_merge(
@@ -124,7 +126,12 @@ class PrinterPollingService
             ));
             $printer->save();
 
-            $syncResult = $this->syncTonerSupplies($printer, $discovered->tonerSupplies, $now);
+            $syncResult = $this->syncTonerSupplies(
+                $printer,
+                $discovered->tonerSupplies,
+                $now,
+                skipMissingActiveCleanup: $isPartialResponse && empty($discovered->tonerSupplies),
+            );
 
             return [
                 'printer' => $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']),
@@ -231,7 +238,12 @@ class PrinterPollingService
      * @param  array<int, array<string, mixed>>  $supplies
      * @return array{replacements: array<int, array{slot_key: string, supply: TonerSupply}>}
      */
-    private function syncTonerSupplies(Printer $printer, array $supplies, Carbon $now): array
+    private function syncTonerSupplies(
+        Printer $printer,
+        array $supplies,
+        Carbon $now,
+        bool $skipMissingActiveCleanup = false,
+    ): array
     {
         $existing = $printer->allTonerSupplies()->get();
         $normalizedSupplies = collect($supplies)
@@ -288,14 +300,16 @@ class PrinterPollingService
             $this->updateSupplySnmpData($activeSupply, $normalized, $now);
         }
 
-        $printer->allTonerSupplies()
-            ->whereNull('removed_at')
-            ->get()
-            ->each(function (TonerSupply $activeSupply) use ($snmpSlotKeys, $now): void {
-                if (! in_array($activeSupply->slot_key, $snmpSlotKeys, true)) {
-                    $this->moveSupplyToHistory($activeSupply, $now);
-                }
-            });
+        if (! $skipMissingActiveCleanup) {
+            $printer->allTonerSupplies()
+                ->whereNull('removed_at')
+                ->get()
+                ->each(function (TonerSupply $activeSupply) use ($snmpSlotKeys, $now): void {
+                    if (! in_array($activeSupply->slot_key, $snmpSlotKeys, true)) {
+                        $this->moveSupplyToHistory($activeSupply, $now);
+                    }
+                });
+        }
 
         foreach ($snmpSlotKeys as $slotKey) {
             if ($this->findActiveSupplyBySlot($existing, $slotKey) !== null) {

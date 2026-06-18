@@ -23,12 +23,16 @@ class TonerHistoryReportTest extends TestCase
     {
         $user = User::factory()->create();
         $this->createHistoricalSupply();
+        $this->createActiveSupply([
+            'snmp_description' => 'ACTIVE-TK-5240C',
+            'slot_key' => '2',
+        ]);
 
         $this->actingAs($user)
             ->get(TonerHistoryReport::getUrl())
             ->assertSuccessful()
-            ->assertSee('Картриджи в истории')
-            ->assertSee('TK-5240K');
+            ->assertSee('TK-5240K')
+            ->assertSee('ACTIVE-TK-5240C');
     }
 
     public function test_generate_report_without_selection_shows_notification(): void
@@ -80,6 +84,61 @@ class TonerHistoryReportTest extends TestCase
         $this->assertNotNull($regularSupply->id);
     }
 
+    public function test_selected_supplies_persist_when_switching_pages(): void
+    {
+        $user = User::factory()->create();
+
+        $selected = null;
+
+        foreach (range(1, 11) as $index) {
+            $supply = $this->createHistoricalSupply([
+                'snmp_description' => sprintf('PAGE-%02d', $index),
+                'slot_key' => (string) $index,
+                'history_slot_key' => (string) $index,
+            ]);
+
+            if ($index === 11) {
+                $selected = $supply;
+            }
+        }
+
+        $this->assertNotNull($selected);
+
+        Livewire::actingAs($user)
+            ->test(TonerHistoryReport::class)
+            ->set('selectedSupplies', [(string) $selected->id])
+            ->call('setPage', 2)
+            ->assertSet('selectedSupplies', [(string) $selected->id]);
+    }
+
+    public function test_service_filter_persists_when_switching_pages(): void
+    {
+        $user = User::factory()->create();
+
+        foreach (range(1, 11) as $index) {
+            $this->createHistoricalSupply([
+                'snmp_description' => sprintf('SERVICE-%02d', $index),
+                'slot_key' => (string) $index,
+                'history_slot_key' => (string) $index,
+                'is_on_service' => true,
+            ]);
+        }
+
+        $this->createHistoricalSupply([
+            'snmp_description' => 'REGULAR-99',
+            'slot_key' => '99',
+            'history_slot_key' => '99',
+            'is_on_service' => false,
+        ]);
+
+        Livewire::actingAs($user)
+            ->test(TonerHistoryReport::class)
+            ->set('serviceOnly', true)
+            ->call('setPage', 2)
+            ->assertSet('serviceOnly', true)
+            ->assertDontSee('REGULAR-99');
+    }
+
     public function test_pdf_service_renders_valid_document(): void
     {
         $supply = $this->createHistoricalSupply();
@@ -118,6 +177,36 @@ class TonerHistoryReportTest extends TestCase
             'comment' => 'Списать',
             'is_on_service' => true,
             'removed_at' => now()->subDay(),
+        ], $overrides));
+    }
+
+    /**
+     * @param  array<string, mixed>  $overrides
+     */
+    private function createActiveSupply(array $overrides = []): TonerSupply
+    {
+        $printerIp = '192.168.1.'.(++$this->printerSequence);
+
+        $printer = Printer::query()->create([
+            'name' => 'Kyocera active',
+            'ip_address' => $printerIp,
+            'snmp_community' => 'public',
+            'snmp_version' => '2c',
+            'status' => PrinterStatus::Online,
+            'is_active' => true,
+        ]);
+
+        return TonerSupply::query()->create(array_merge([
+            'printer_id' => $printer->id,
+            'slot_key' => '1',
+            'history_slot_key' => null,
+            'color' => TonerColor::Black,
+            'snmp_description' => 'ACTIVE-TK-5240K',
+            'percentage' => 54,
+            'is_known' => true,
+            'comment' => 'Активный картридж',
+            'is_on_service' => false,
+            'removed_at' => null,
         ], $overrides));
     }
 }

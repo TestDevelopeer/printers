@@ -9,11 +9,15 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Livewire\Attributes\Session;
+use Livewire\WithPagination;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TonerHistoryReport extends Page
 {
+    use WithPagination;
+
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
     protected static ?string $navigationLabel = 'Отчет';
@@ -25,27 +29,22 @@ class TonerHistoryReport extends Page
     /**
      * @var array<int, int|string>
      */
+    #[Session]
     public array $selectedSupplies = [];
 
+    #[Session]
     public bool $serviceOnly = false;
 
-    public function getHistorySuppliesProperty(): EloquentCollection
+    public int $perPage = 10;
+
+    public function getSuppliesProperty(): LengthAwarePaginator
     {
-        return $this->historySuppliesQuery()->get();
+        return $this->suppliesQuery()->paginate($this->perPage);
     }
 
     public function updatedServiceOnly(): void
     {
-        $visibleIds = $this->historySuppliesQuery()
-            ->pluck('id')
-            ->map(fn ($id): int => (int) $id)
-            ->all();
-
-        $this->selectedSupplies = collect($this->selectedSupplies)
-            ->map(fn ($id): int => (int) $id)
-            ->filter(fn (int $id): bool => in_array($id, $visibleIds, true))
-            ->values()
-            ->all();
+        $this->resetPage();
     }
 
     public function generateReport(TonerHistoryReportPdfService $pdfService): ?StreamedResponse
@@ -68,9 +67,11 @@ class TonerHistoryReport extends Page
         }
 
         $supplies = TonerSupply::query()
-            ->tap(fn (Builder $query) => $this->applyHistorySuppliesFilter($query))
+            ->tap(fn (Builder $query) => $this->applySuppliesFilter($query))
             ->whereIn('id', $ids)
             ->with('printer')
+            ->orderByRaw('CASE WHEN removed_at IS NULL THEN 0 ELSE 1 END ASC')
+            ->orderByDesc('last_seen_at')
             ->orderByDesc('removed_at')
             ->orderByDesc('id')
             ->get();
@@ -92,18 +93,29 @@ class TonerHistoryReport extends Page
         );
     }
 
-    private function historySuppliesQuery(): Builder
+    public function reportStatusLabel(TonerSupply $supply): string
     {
-        $query = TonerSupply::query()->inHistory();
+        if ($supply->removed_at === null) {
+            return 'РђРєС‚РёРІРЅС‹Р№';
+        }
 
-        return $this->applyHistorySuppliesFilter($query);
+        return $supply->is_on_service ? 'РќР° РѕР±СЃР»СѓР¶РёРІР°РЅРёРё' : 'Р’ РёСЃС‚РѕСЂРёРё';
     }
 
-    private function applyHistorySuppliesFilter(Builder $query): Builder
+    private function suppliesQuery(): Builder
+    {
+        $query = TonerSupply::query();
+
+        return $this->applySuppliesFilter($query);
+    }
+
+    private function applySuppliesFilter(Builder $query): Builder
     {
         return $query
             ->when($this->serviceOnly, fn (Builder $query) => $query->where('is_on_service', true))
             ->with('printer')
+            ->orderByRaw('CASE WHEN removed_at IS NULL THEN 0 ELSE 1 END ASC')
+            ->orderByDesc('last_seen_at')
             ->orderByDesc('removed_at')
             ->orderByDesc('id');
     }

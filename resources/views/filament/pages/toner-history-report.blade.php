@@ -86,10 +86,17 @@
             font-size: 0.875rem;
             opacity: 0.75;
         }
+        .toner-report__footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding: 0.875rem 1rem;
+            border-top: 1px solid var(--tr-border);
+        }
     </style>
 
     <div class="toner-report space-y-6">
-        @if ($this->historySupplies->isEmpty())
+        @if ($this->supplies->isEmpty())
             <div class="toner-report__empty">
                 В истории пока нет картриджей. После замены или удаления слота записи появятся здесь.
             </div>
@@ -132,8 +139,8 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach ($this->historySupplies as $supply)
-                                <tr wire:key="history-supply-{{ $supply->id }}">
+                            @foreach ($this->supplies as $supply)
+                                <tr wire:key="report-supply-{{ $supply->id }}">
                                     <td class="col-select">
                                         <input
                                             type="checkbox"
@@ -146,13 +153,16 @@
                                     <td class="col-slot">{{ $supply->display_slot }}</td>
                                     <td>{{ $supply->printer?->display_name ?? '—' }}</td>
                                     <td>{{ $supply->color_label }}</td>
-                                    <td>{{ $supply->removed_at === null ? 'Активный' : $supply->service_status_label }}</td>
+                                    <td>{{ $this->reportStatusLabel($supply) }}</td>
                                     <td>{{ $supply->comment_display }}</td>
                                     <td class="col-toner">{{ $supply->percentage_display }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
                     </table>
+                </div>
+                <div class="toner-report__footer">
+                    {{ $this->supplies->links() }}
                 </div>
             </div>
         @endif

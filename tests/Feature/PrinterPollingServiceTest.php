@@ -210,6 +210,30 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertSame('3', $history->history_slot_key);
     }
 
+    public function test_partial_empty_response_does_not_move_active_supply_to_history(): void
+    {
+        $printer = $this->makePrinter('192.168.1.35');
+        $service = $this->makeService();
+
+        $service->syncFromDiscovery($printer, $this->discovery([
+            $this->supply('3', 'yellow', 'TK-5240Y', 55),
+        ]));
+
+        $active = $printer->fresh()->tonerSupplies()->first();
+
+        $service->syncFromDiscovery(
+            $printer->fresh(),
+            $this->discovery([]),
+            isPartialResponse: true,
+        );
+
+        $printer->refresh();
+
+        $this->assertCount(1, $printer->tonerSupplies);
+        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame($active?->id, $printer->tonerSupplies()->first()?->id);
+    }
+
     public function test_select_from_history_reactivates_cartridge_and_moves_provisional_to_history(): void
     {
         $printer = $this->makePrinter('192.168.1.30');
