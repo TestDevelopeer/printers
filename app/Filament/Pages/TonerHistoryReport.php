@@ -96,10 +96,12 @@ class TonerHistoryReport extends Page
     public function reportStatusLabel(TonerSupply $supply): string
     {
         if ($supply->removed_at === null) {
-            return 'РђРєС‚РёРІРЅС‹Р№';
+            return "\u{0410}\u{043A}\u{0442}\u{0438}\u{0432}\u{043D}\u{044B}\u{0439}";
         }
 
-        return $supply->is_on_service ? 'РќР° РѕР±СЃР»СѓР¶РёРІР°РЅРёРё' : 'Р’ РёСЃС‚РѕСЂРёРё';
+        return $supply->is_on_service
+            ? "\u{041D}\u{0430} \u{043E}\u{0431}\u{0441}\u{043B}\u{0443}\u{0436}\u{0438}\u{0432}\u{0430}\u{043D}\u{0438}\u{0438}"
+            : "\u{0412} \u{0438}\u{0441}\u{0442}\u{043E}\u{0440}\u{0438}\u{0438}";
     }
 
     private function suppliesQuery(): Builder

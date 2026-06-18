@@ -89,9 +89,14 @@
         .toner-report__footer {
             display: flex;
             align-items: center;
-            justify-content: flex-end;
-            padding: 0.875rem 1rem;
+            justify-content: center;
+            padding: 1rem;
             border-top: 1px solid var(--tr-border);
+            overflow-x: auto;
+        }
+
+        .toner-report__pagination {
+            min-width: max-content;
         }
     </style>
 
