@@ -36,8 +36,6 @@ class TonerSupply extends Model
         'is_on_service',
         'needs_identity_confirmation',
         'replacement_detected_at',
-        'transfer_target_printer_id',
-        'transfer_detected_at',
     ];
 
     protected function casts(): array
@@ -54,7 +52,6 @@ class TonerSupply extends Model
             'is_color_manual' => 'boolean',
             'needs_identity_confirmation' => 'boolean',
             'replacement_detected_at' => 'datetime',
-            'transfer_detected_at' => 'datetime',
         ];
     }
 
@@ -63,14 +60,11 @@ class TonerSupply extends Model
         return $this->belongsTo(Printer::class);
     }
 
-    public function transferTargetPrinter(): BelongsTo
+    public function scopeOnService(Builder $query): Builder
     {
-        return $this->belongsTo(Printer::class, 'transfer_target_printer_id');
-    }
-
-    public function scopeInHistory(Builder $query): Builder
-    {
-        return $query->whereNotNull('removed_at');
+        return $query
+            ->where('is_on_service', true)
+            ->whereNull('printer_id');
     }
 
     public function scopeOrderByInstallationSlot(Builder $query, bool $preferHistorySlot = false): Builder

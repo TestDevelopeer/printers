@@ -31,11 +31,11 @@ class PrinterPollingServiceTest extends TestCase
         $printer->refresh();
 
         $this->assertCount(2, $printer->tonerSupplies);
-        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame(0, TonerSupply::query()->onService()->count());
         $this->assertFalse($printer->tonerSupplies->contains(fn (TonerSupply $s) => $s->needs_identity_confirmation));
     }
 
-    public function test_toner_increase_creates_provisional_supply_and_moves_old_to_history(): void
+    public function test_toner_increase_creates_provisional_supply_and_moves_old_to_service(): void
     {
         $printer = $this->makePrinter('192.168.1.26');
         $service = $this->makeService();
@@ -53,14 +53,14 @@ class PrinterPollingServiceTest extends TestCase
 
         $printer->refresh();
         $active = $printer->tonerSupplies()->first();
-        $history = $printer->tonerHistory()->first();
+        $serviceSupply = TonerSupply::query()->onService()->first();
 
         $this->assertNotNull($active);
-        $this->assertNotNull($history);
+        $this->assertNotNull($serviceSupply);
         $this->assertNotSame($oldSupply?->id, $active->id);
-        $this->assertSame($oldSupply?->id, $history->id);
-        $this->assertSame('2', $history->history_slot_key);
-        $this->assertSame('Номер 2', $history->comment);
+        $this->assertSame($oldSupply?->id, $serviceSupply->id);
+        $this->assertSame('2', $serviceSupply->history_slot_key);
+        $this->assertSame('Номер 2', $serviceSupply->comment);
         $this->assertTrue($active->needs_identity_confirmation);
         $this->assertSame(80, $active->percentage);
     }
@@ -83,7 +83,7 @@ class PrinterPollingServiceTest extends TestCase
         $printer->refresh();
 
         $this->assertCount(1, $printer->tonerSupplies);
-        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame(0, TonerSupply::query()->onService()->count());
         $this->assertSame($supply?->id, $printer->tonerSupplies()->first()?->id);
         $this->assertFalse($printer->tonerSupplies()->first()?->needs_identity_confirmation);
     }
@@ -107,7 +107,7 @@ class PrinterPollingServiceTest extends TestCase
         $active = $printer->tonerSupplies()->first();
 
         $this->assertCount(1, $printer->tonerSupplies);
-        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame(0, TonerSupply::query()->onService()->count());
         $this->assertSame($supply?->id, $active?->id);
         $this->assertFalse($active?->needs_identity_confirmation);
         $this->assertTrue($active?->is_known);
@@ -132,7 +132,7 @@ class PrinterPollingServiceTest extends TestCase
         $printer->refresh();
 
         $this->assertCount(1, $printer->tonerSupplies);
-        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame(0, TonerSupply::query()->onService()->count());
         $this->assertSame($supply?->id, $printer->tonerSupplies()->first()?->id);
         $this->assertFalse($printer->tonerSupplies()->first()?->needs_identity_confirmation);
     }
@@ -157,9 +157,9 @@ class PrinterPollingServiceTest extends TestCase
         $printer->refresh();
 
         $this->assertCount(1, $printer->tonerSupplies);
-        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame(0, TonerSupply::query()->onService()->count());
         $this->assertSame(44, $printer->tonerSupplies()->first()?->percentage);
-        $this->assertFalse($printer->tonerSupplies()->first()?->needs_identity_confirmation);
+        $this->assertFalse($printer->tonerSupplies->first()?->needs_identity_confirmation);
     }
 
     public function test_pending_slot_updates_snmp_without_new_replacement(): void
@@ -189,7 +189,7 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertCount(1, $printer->fresh()->tonerSupplies);
     }
 
-    public function test_missing_slot_moves_active_supply_to_history_with_slot_key(): void
+    public function test_missing_slot_moves_active_supply_to_service_with_slot_key(): void
     {
         $printer = $this->makePrinter('192.168.1.29');
         $service = $this->makeService();
@@ -202,15 +202,15 @@ class PrinterPollingServiceTest extends TestCase
 
         $service->syncFromDiscovery($printer->fresh(), $this->discovery([]));
 
-        $history = $printer->fresh()->tonerHistory()->first();
+        $serviceSupply = TonerSupply::query()->onService()->first();
 
         $this->assertCount(0, $printer->fresh()->tonerSupplies);
-        $this->assertNotNull($history);
-        $this->assertSame($active?->id, $history->id);
-        $this->assertSame('3', $history->history_slot_key);
+        $this->assertNotNull($serviceSupply);
+        $this->assertSame($active?->id, $serviceSupply->id);
+        $this->assertSame('3', $serviceSupply->history_slot_key);
     }
 
-    public function test_partial_empty_response_does_not_move_active_supply_to_history(): void
+    public function test_partial_empty_response_does_not_move_active_supply_to_service(): void
     {
         $printer = $this->makePrinter('192.168.1.35');
         $service = $this->makeService();
@@ -230,11 +230,11 @@ class PrinterPollingServiceTest extends TestCase
         $printer->refresh();
 
         $this->assertCount(1, $printer->tonerSupplies);
-        $this->assertCount(0, $printer->tonerHistory);
+        $this->assertSame(0, TonerSupply::query()->onService()->count());
         $this->assertSame($active?->id, $printer->tonerSupplies()->first()?->id);
     }
 
-    public function test_select_from_history_reactivates_cartridge_and_moves_provisional_to_history(): void
+    public function test_install_from_service_reactivates_cartridge_and_moves_provisional_to_service(): void
     {
         $printer = $this->makePrinter('192.168.1.30');
         $service = $this->makeService();
@@ -252,9 +252,9 @@ class PrinterPollingServiceTest extends TestCase
         ]));
 
         $provisional = $printer->fresh()->tonerSupplies()->first();
-        $history = $printer->fresh()->tonerHistory()->first();
+        $serviceSupply = TonerSupply::query()->onService()->first();
 
-        $identityService->selectFromHistory($printer->fresh(), '2', $history);
+        $identityService->installFromService($printer->fresh(), '2', $serviceSupply, $provisional);
 
         $printer->refresh();
         $active = $printer->tonerSupplies()->first();
@@ -264,10 +264,10 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertSame('Номер 2', $active->comment);
         $this->assertSame(90, $active->percentage);
         $this->assertFalse($active->needs_identity_confirmation);
-        $this->assertTrue($printer->tonerHistory()->whereKey($provisional?->id)->exists());
+        $this->assertTrue(TonerSupply::query()->onService()->whereKey($provisional?->id)->exists());
     }
 
-    public function test_save_as_new_confirms_provisional_supply_in_place(): void
+    public function test_confirm_provisional_as_new_keeps_supply_in_place(): void
     {
         $printer = $this->makePrinter('192.168.1.31');
         $service = $this->makeService();
@@ -283,7 +283,7 @@ class PrinterPollingServiceTest extends TestCase
 
         $provisional = $printer->fresh()->tonerSupplies()->first();
 
-        $confirmedSupply = $identityService->saveAsNew($printer->fresh(), '2', 'Картридж 2 слот 2');
+        $confirmedSupply = $identityService->confirmProvisionalAsNew($provisional, 'Картридж 2 слот 2');
 
         $printer->refresh();
 
@@ -291,15 +291,14 @@ class PrinterPollingServiceTest extends TestCase
         $this->assertSame('Картридж 2 слот 2', $confirmedSupply->comment);
         $this->assertSame(88, $confirmedSupply->percentage);
         $this->assertFalse($confirmedSupply->needs_identity_confirmation);
-        $this->assertFalse($printer->tonerHistory()->whereKey($provisional?->id)->exists());
+        $this->assertFalse(TonerSupply::query()->onService()->whereKey($provisional?->id)->exists());
         $this->assertCount(1, $printer->tonerSupplies);
     }
 
-    public function test_delete_from_history_removes_supply_record(): void
+    public function test_service_supply_can_be_deleted_directly(): void
     {
         $printer = $this->makePrinter('192.168.1.32');
         $service = $this->makeService();
-        $identityService = new TonerSupplyIdentityService();
 
         $service->syncFromDiscovery($printer, $this->discovery([
             $this->supply('2', 'magenta', 'TK-5240M', 12),
@@ -309,32 +308,15 @@ class PrinterPollingServiceTest extends TestCase
             $this->supply('2', 'magenta', 'TK-5240M', 88),
         ]));
 
-        $historySupply = $printer->fresh()->tonerHistory()->first();
+        $serviceSupply = TonerSupply::query()->onService()->first();
 
-        $this->assertNotNull($historySupply);
+        $this->assertNotNull($serviceSupply);
 
-        $identityService->deleteFromHistory($historySupply);
+        $serviceSupply->delete();
 
         $this->assertDatabaseMissing('toner_supplies', [
-            'id' => $historySupply->id,
+            'id' => $serviceSupply->id,
         ]);
-    }
-
-    public function test_delete_from_history_rejects_active_supply(): void
-    {
-        $printer = $this->makePrinter('192.168.1.33');
-        $service = $this->makeService();
-        $identityService = new TonerSupplyIdentityService();
-
-        $service->syncFromDiscovery($printer, $this->discovery([
-            $this->supply('2', 'magenta', 'TK-5240M', 12),
-        ]));
-
-        $activeSupply = $printer->fresh()->tonerSupplies()->first();
-
-        $this->expectException(\InvalidArgumentException::class);
-
-        $identityService->deleteFromHistory($activeSupply);
     }
 
     /**

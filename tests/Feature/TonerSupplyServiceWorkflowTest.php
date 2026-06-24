@@ -18,7 +18,7 @@ class TonerSupplyServiceWorkflowTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_send_active_to_service_moves_supply_to_history_and_marks_slot_awaiting_poll(): void
+    public function test_send_active_to_service_detaches_supply_and_marks_slot_awaiting_poll(): void
     {
         $printer = $this->makePrinter('192.168.1.40');
         $supply = $this->createActiveSupply($printer, '2', 55);
@@ -32,8 +32,10 @@ class TonerSupplyServiceWorkflowTest extends TestCase
         $printer->refresh();
         $supply->refresh();
 
-        $this->assertNotNull($supply->removed_at);
+        $this->assertNull($supply->printer_id);
+        $this->assertNull($supply->slot_key);
         $this->assertSame('2', $supply->history_slot_key);
+        $this->assertNotNull($supply->removed_at);
         $this->assertTrue($supply->is_on_service);
         $this->assertSame('Старый картридж', $supply->comment);
         $this->assertCount(0, $printer->tonerSupplies);
@@ -86,7 +88,7 @@ class TonerSupplyServiceWorkflowTest extends TestCase
         $this->assertSame('placeholder', $printer->ordered_toner_display_items[1]['type']);
     }
 
-    public function test_activate_from_history_installs_cartridge_into_awaiting_slot(): void
+    public function test_install_from_service_attaches_cartridge_to_awaiting_slot(): void
     {
         $printer = $this->makePrinter('192.168.1.43');
         $supply = $this->createActiveSupply($printer, '2', 55);
@@ -95,12 +97,13 @@ class TonerSupplyServiceWorkflowTest extends TestCase
         $service->sendActiveToService($supply, 'magenta', 'На заправку');
 
         $printer->refresh();
-        $supply->refresh();
+        $serviceSupply = TonerSupply::query()->onService()->first();
+        $this->assertNotNull($serviceSupply);
 
-        $activated = $service->activateFromHistory($printer, '2', $supply);
+        $activated = $service->installFromService($printer, '2', $serviceSupply);
 
         $printer->refresh();
-        $supply->refresh();
+        $serviceSupply->refresh();
 
         $this->assertNull($activated->removed_at);
         $this->assertSame('2', $activated->slot_key);
@@ -110,55 +113,64 @@ class TonerSupplyServiceWorkflowTest extends TestCase
         $this->assertTrue($printer->tonerSupplies->first()?->is($activated));
     }
 
-    public function test_activate_from_history_swaps_with_current_active_supply(): void
+    public function test_install_from_service_into_other_printer_moves_old_active_to_service(): void
     {
-        $printer = $this->makePrinter('192.168.1.44');
-        $historical = $this->createActiveSupply($printer, '2', 55);
+        $printerA = $this->makePrinter('192.168.1.44');
+        $historical = $this->createActiveSupply($printerA, '2', 55);
 
         $service = app(TonerSupplyIdentityService::class);
         $service->sendActiveToService($historical, 'magenta', 'Старый');
 
-        $currentActive = $this->createActiveSupply($printer, '2', 90);
-        $printer->addAwaitingSlotPollKey('2');
-        $printer->save();
+        $printerB = $this->makePrinter('192.168.1.45');
+        $currentActive = $this->createActiveSupply($printerB, '2', 90);
+        $printerB->addAwaitingSlotPollKey('2');
+        $printerB->save();
 
-        $activated = $service->activateFromHistory($printer, '2', $historical->fresh());
+        $serviceSupply = TonerSupply::query()->onService()->first();
+        $this->assertNotNull($serviceSupply);
 
-        $printer->refresh();
-        $historical->refresh();
+        $activated = $service->installFromService($printerB, '2', $serviceSupply);
+
+        $printerB->refresh();
+        $serviceSupply->refresh();
         $currentActive->refresh();
 
         $this->assertNull($activated->removed_at);
         $this->assertSame('2', $activated->slot_key);
+        $this->assertSame($printerB->id, $activated->printer_id);
         $this->assertFalse($activated->is_on_service);
 
-        $this->assertNotNull($currentActive->removed_at);
+        $this->assertNull($currentActive->printer_id);
+        $this->assertNull($currentActive->slot_key);
         $this->assertSame('2', $currentActive->history_slot_key);
-        $this->assertFalse($currentActive->is_on_service);
-        $this->assertSame([], $printer->awaiting_slot_poll_keys ?? []);
-        $this->assertCount(1, $printer->tonerSupplies);
-        $this->assertTrue($printer->tonerSupplies->first()?->is($activated));
+        $this->assertNotNull($currentActive->removed_at);
+        $this->assertTrue($currentActive->is_on_service);
+        $this->assertSame([], $printerB->awaiting_slot_poll_keys ?? []);
+        $this->assertCount(1, $printerB->tonerSupplies);
+        $this->assertTrue($printerB->tonerSupplies->first()?->is($activated));
     }
 
-    public function test_activate_from_history_restores_service_cartridge_with_metadata(): void
+    public function test_install_from_service_restores_supply_with_metadata(): void
     {
-        $printer = $this->makePrinter('192.168.1.45');
+        $printer = $this->makePrinter('192.168.1.46');
         $supply = $this->createActiveSupply($printer, '1', 40);
 
         $service = app(TonerSupplyIdentityService::class);
         $service->sendActiveToService($supply, 'black', 'На обслуживание');
 
-        $supply->refresh();
+        $serviceSupply = TonerSupply::query()->onService()->first();
+        $this->assertNotNull($serviceSupply);
 
-        $activated = $service->activateFromHistory(
+        $activated = $service->installFromService(
             $printer,
             '1',
-            $supply,
+            $serviceSupply,
+            null,
             'cyan',
             'Вернулся с заправки',
         );
 
-        $supply->refresh();
+        $serviceSupply->refresh();
 
         $this->assertNull($activated->removed_at);
         $this->assertSame('1', $activated->slot_key);
@@ -166,6 +178,20 @@ class TonerSupplyServiceWorkflowTest extends TestCase
         $this->assertSame('cyan', $activated->color?->value ?? $activated->color);
         $this->assertTrue($activated->is_color_manual);
         $this->assertSame('Вернулся с заправки', $activated->comment);
+    }
+
+    public function test_install_from_service_rejects_already_installed_supply(): void
+    {
+        $printer = $this->makePrinter('192.168.1.47');
+        $active = $this->createActiveSupply($printer, '2', 55);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        app(TonerSupplyIdentityService::class)->installFromService(
+            $printer,
+            '2',
+            $active,
+        );
     }
 
     private function makePrinter(string $ipAddress): Printer

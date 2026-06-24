@@ -75,7 +75,7 @@ class PrinterPollingService
                 'last_error' => $exception->getMessage(),
             ])->save();
 
-            $printer = $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']);
+            $printer = $printer->fresh(['tonerSupplies', 'allTonerSupplies']);
             $this->printerAlertService->dispatchAlerts(
                 $printer,
                 $previousStatus,
@@ -134,7 +134,7 @@ class PrinterPollingService
             );
 
             return [
-                'printer' => $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']),
+                'printer' => $printer->fresh(['tonerSupplies', 'allTonerSupplies']),
                 'replacements' => $syncResult['replacements'],
             ];
         });
@@ -214,7 +214,7 @@ class PrinterPollingService
             'last_error' => $message,
         ])->save();
 
-        $printer = $printer->fresh(['tonerSupplies', 'tonerHistory', 'allTonerSupplies']);
+        $printer = $printer->fresh(['tonerSupplies', 'allTonerSupplies']);
         $this->printerAlertService->dispatchAlerts(
             $printer,
             $previousStatus ?? $printer->status,
@@ -381,9 +381,12 @@ class PrinterPollingService
 
     private function moveSupplyToHistory(TonerSupply $supply, Carbon $now): void
     {
+        $slotKey = $supply->slot_key;
         $supply->forceFill([
+            'printer_id' => null,
+            'slot_key' => null,
+            'history_slot_key' => $slotKey,
             'removed_at' => $now,
-            'history_slot_key' => $supply->slot_key,
             'is_on_service' => true,
             'needs_identity_confirmation' => false,
             'replacement_detected_at' => null,
@@ -391,6 +394,9 @@ class PrinterPollingService
         ])->save();
     }
 
+    /**
+     * @param  array<string, mixed>  $normalized
+     */
     /**
      * @param  array<string, mixed>  $normalized
      */
@@ -409,9 +415,6 @@ class PrinterPollingService
         return ((int) $normalized['percentage'] - (int) $activeSupply->percentage) >= $minIncrease;
     }
 
-    /**
-     * @param  array<string, mixed>  $normalized
-     */
     private function shouldPreserveKnownState(TonerSupply $activeSupply, array $normalized): bool
     {
         return $this->isKnownSupplyState($activeSupply->is_known, $activeSupply->percentage)

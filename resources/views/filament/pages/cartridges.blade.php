@@ -103,25 +103,18 @@
     <div class="toner-report space-y-6">
         @if ($this->supplies->isEmpty())
             <div class="toner-report__empty">
-                В истории пока нет картриджей. После замены или удаления слота записи появятся здесь.
+                Свободных картриджей нет. Отправьте активный картридж на обслуживание со страницы принтера, чтобы он появился здесь.
             </div>
         @else
             <div class="toner-report__card">
                 <div class="toner-report__header">
                     <div>
-                        <div class="toner-report__title">Картриджи в истории</div>
+                        <div class="toner-report__title">Картриджи на обслуживании</div>
                         <div class="toner-report__hint">
                             Выберите позиции для включения в PDF-отчет. В отчете добавляются колонки «Подпись получателя» и «Подпись владельца».
                         </div>
                     </div>
                     <div class="flex items-center gap-4">
-                        <label class="inline-flex items-center gap-2 text-sm">
-                            <input
-                                type="checkbox"
-                                wire:model.live="serviceOnly"
-                            >
-                            <span>На обслуживании</span>
-                        </label>
                         <x-filament::button wire:click="generateReport" color="primary">
                             Сформировать отчет
                         </x-filament::button>
@@ -136,16 +129,16 @@
                                 <th class="col-id">ID</th>
                                 <th>Название</th>
                                 <th class="col-slot">Слот</th>
-                                <th>Принтер</th>
                                 <th>Цвет</th>
                                 <th>Статус</th>
                                 <th>Комментарий</th>
                                 <th class="col-toner">% тонера</th>
+                                <th>Отправлен</th>
                             </tr>
                         </thead>
                         <tbody>
                             @foreach ($this->supplies as $supply)
-                                <tr wire:key="report-supply-{{ $supply->id }}">
+                                <tr wire:key="cartridge-supply-{{ $supply->id }}">
                                     <td class="col-select">
                                         <input
                                             type="checkbox"
@@ -156,11 +149,11 @@
                                     <td class="col-id">{{ $supply->id }}</td>
                                     <td>{{ $supply->display_name }}</td>
                                     <td class="col-slot">{{ $supply->display_slot }}</td>
-                                    <td>{{ $supply->printer?->display_name ?? '—' }}</td>
                                     <td>{{ $supply->color_label }}</td>
-                                    <td>{{ $this->reportStatusLabel($supply) }}</td>
+                                    <td>{{ $supply->service_status_label }}</td>
                                     <td>{{ $supply->comment_display }}</td>
                                     <td class="col-toner">{{ $supply->percentage_display }}</td>
+                                    <td>{{ optional($supply->removed_at)->format('d.m.Y H:i') ?? '—' }}</td>
                                 </tr>
                             @endforeach
                         </tbody>
