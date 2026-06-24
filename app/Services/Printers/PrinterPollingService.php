@@ -22,7 +22,7 @@ class PrinterPollingService
     ) {
     }
 
-    public function poll(Printer $printer): PrinterPollResult
+    public function poll(Printer $printer, bool $createProvisionalForEmptySlots = false): PrinterPollResult
     {
         $previousStatus = $printer->status;
         $previousLowTonerStates = $this->snapshotLowTonerStates($printer);
@@ -56,6 +56,7 @@ class PrinterPollingService
                 $previousStatus,
                 $previousLowTonerStates,
                 $discovery->isPartialResponse,
+                $createProvisionalForEmptySlots,
             );
 
             return new PrinterPollResult(
@@ -105,11 +106,12 @@ class PrinterPollingService
         ?PrinterStatus $previousStatus = null,
         ?array $previousLowTonerStates = null,
         bool $isPartialResponse = false,
+        bool $createProvisionalForEmptySlots = false,
     ): Printer {
         $previousStatus ??= $printer->status;
         $previousLowTonerStates ??= $this->snapshotLowTonerStates($printer);
 
-        $result = DB::transaction(function () use ($printer, $discovered, $isPartialResponse): array {
+        $result = DB::transaction(function () use ($printer, $discovered, $isPartialResponse, $createProvisionalForEmptySlots): array {
             $now = Carbon::now();
 
             $printer->fill(array_merge(
@@ -131,6 +133,7 @@ class PrinterPollingService
                 $discovered->tonerSupplies,
                 $now,
                 skipMissingActiveCleanup: $isPartialResponse && empty($discovered->tonerSupplies),
+                createProvisionalForEmptySlots: $createProvisionalForEmptySlots,
             );
 
             return [
@@ -243,6 +246,7 @@ class PrinterPollingService
         array $supplies,
         Carbon $now,
         bool $skipMissingActiveCleanup = false,
+        bool $createProvisionalForEmptySlots = false,
     ): array
     {
         $existing = $printer->allTonerSupplies()->get();
@@ -265,7 +269,19 @@ class PrinterPollingService
             $activeSupply = $this->findActiveSupplyBySlot($existing, $slotKey);
 
             if ($activeSupply === null) {
-                $supply = $this->createActiveSupply($printer, $normalized, $now, confirmed: true);
+                $isAwaiting = in_array($slotKey, $printer->awaiting_slot_poll_keys ?? [], true);
+
+                if ($isAwaiting && ! $createProvisionalForEmptySlots) {
+                    // Slot was just sent to service; wait for explicit user action.
+                    continue;
+                }
+
+                $supply = $this->createActiveSupply(
+                    $printer,
+                    $normalized,
+                    $now,
+                    confirmed: ! $createProvisionalForEmptySlots,
+                );
                 $existing->push($supply);
 
                 continue;

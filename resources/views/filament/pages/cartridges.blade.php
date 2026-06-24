@@ -79,6 +79,49 @@
             width: 6rem;
         }
 
+        .toner-report__table .col-actions {
+            width: 6rem;
+            text-align: center;
+        }
+
+        .toner-report__row-actions {
+            display: inline-flex;
+            gap: 0.25rem;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toner-report__icon-btn {
+            appearance: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.75rem;
+            height: 1.75rem;
+            padding: 0;
+            background: transparent;
+            border: 1px solid color-mix(in oklab, currentColor 15%, transparent);
+            border-radius: 0.375rem;
+            color: inherit;
+            cursor: pointer;
+            transition: background-color 120ms ease, border-color 120ms ease;
+        }
+
+        .toner-report__icon-btn:hover {
+            background: color-mix(in oklab, currentColor 8%, transparent);
+            border-color: color-mix(in oklab, currentColor 25%, transparent);
+        }
+
+        .toner-report__icon-btn--danger:hover {
+            color: #dc2626;
+            border-color: #dc2626;
+        }
+
+        .toner-report__icon {
+            width: 1rem;
+            height: 1rem;
+        }
+
         .toner-report__empty {
             border-radius: 0.75rem;
             border: 1px dashed var(--tr-border);
@@ -195,6 +238,30 @@
                                     <td>{{ $supply->comment_display }}</td>
                                     <td class="col-toner">{{ $supply->percentage_display }}</td>
                                     <td>{{ optional($supply->removed_at)->format('d.m.Y H:i') ?? '—' }}</td>
+                                    <td class="col-actions">
+                                        <div class="toner-report__row-actions">
+                                            <button
+                                                type="button"
+                                                class="toner-report__icon-btn"
+                                                title="Изменить"
+                                                wire:click="mountAction('edit_supply', { record: {{ $supply->id }} })"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="toner-report__icon">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125" />
+                                                </svg>
+                                            </button>
+                                            <button
+                                                type="button"
+                                                class="toner-report__icon-btn toner-report__icon-btn--danger"
+                                                title="Удалить"
+                                                wire:click="mountAction('delete_supply', { record: {{ $supply->id }} })"
+                                            >
+                                                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.8" stroke="currentColor" class="toner-report__icon">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+                                                </svg>
+                                            </button>
+                                        </div>
+                                    </td>
                                 </tr>
                             @endforeach
                         </tbody>

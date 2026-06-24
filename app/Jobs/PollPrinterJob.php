@@ -21,6 +21,7 @@ class PollPrinterJob implements ShouldQueue
     public function __construct(
         public int $printerId,
         public string $source = 'scheduled',
+        public bool $createProvisionalForEmptySlots = false,
     ) {
     }
 
@@ -56,7 +57,7 @@ class PollPrinterJob implements ShouldQueue
         ]);
 
         try {
-            $result = $printerPollingService->poll($printer);
+            $result = $printerPollingService->poll($printer, $this->createProvisionalForEmptySlots);
 
             $finishedAt = Carbon::now();
             $this->fillLogFromResult($log, $result, $startedAt, $finishedAt);

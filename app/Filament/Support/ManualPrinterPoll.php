@@ -11,14 +11,14 @@ class ManualPrinterPoll
     /**
      * @throws Throwable
      */
-    public static function run(Printer $printer): void
+    public static function run(Printer $printer, bool $createProvisionalForEmptySlots = false): void
     {
         $printer->forceFill([
             'is_polling' => true,
             'manual_poll_requested_at' => now(),
         ])->save();
 
-        PollPrinterJob::dispatchSync($printer->getKey(), 'manual');
+        PollPrinterJob::dispatchSync($printer->getKey(), 'manual', $createProvisionalForEmptySlots);
 
         $printer->refresh();
     }

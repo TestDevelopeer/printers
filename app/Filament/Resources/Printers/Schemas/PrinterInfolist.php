@@ -118,9 +118,13 @@ class PrinterInfolist {
                                         ->color('warning'),
                                 ])->columnSpan(1),
                                 Group::make([
+                                    TextEntry::make('refresh')
+                                        ->label('Опрос')
+                                        ->state('Создать картридж из SNMP-данных принтера')
+                                        ->suffixAction(self::refreshPrinterForSlotAction()),
                                     TextEntry::make('choose')
-                                        ->label('Действие')
-                                        ->state('Выберите картридж из пула на обслуживании')
+                                        ->label('Установка')
+                                        ->state('Выбрать картридж из пула на обслуживании')
                                         ->suffixAction(self::chooseCartridgeForAwaitingSlotAction()),
                                 ])->columnSpan(1),
                             ])
@@ -268,6 +272,51 @@ class PrinterInfolist {
                     ->title('Картридж для слота подтверждён')
                     ->success()
                     ->send();
+            });
+    }
+
+    private static function refreshPrinterForSlotAction(): Action
+    {
+        return Action::make('refresh_printer_for_slot')
+            ->button()
+            ->icon('heroicon-m-arrow-path')
+            ->label('Обновить принтер')
+            ->color('primary')
+            ->size('sm')
+            ->modalHeading('Обновить принтер')
+            ->modalDescription('Будет выполнен опрос принтера. Если в этом слоте есть данные SNMP, будет создан новый картридж для подтверждения.')
+            ->requiresConfirmation()
+            ->modalSubmitActionLabel('Опросить')
+            ->action(function (array $record, $livewire): void {
+                $printer = $livewire->getRecord();
+
+                if (! $printer instanceof Printer) {
+                    throw new InvalidArgumentException('Не удалось определить принтер.');
+                }
+
+                $slotKey = (string) ($record['slot_key'] ?? '');
+
+                if ($slotKey === '') {
+                    throw new InvalidArgumentException('Не удалось определить слот.');
+                }
+
+                $printer->addAwaitingSlotPollKey($slotKey);
+
+                try {
+                    ManualPrinterPoll::run($printer, createProvisionalForEmptySlots: true);
+
+                    Notification::make()
+                        ->title('Опрос выполнен')
+                        ->body("Принтер {$printer->display_name} опрошен.")
+                        ->success()
+                        ->send();
+                } catch (Throwable $exception) {
+                    Notification::make()
+                        ->title('Ошибка опроса')
+                        ->body($exception->getMessage())
+                        ->danger()
+                        ->send();
+                }
             });
     }
 

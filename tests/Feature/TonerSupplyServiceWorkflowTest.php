@@ -47,7 +47,7 @@ class TonerSupplyServiceWorkflowTest extends TestCase
         $this->assertSame('2', $items[0]['slot_key']);
     }
 
-    public function test_poll_clears_awaiting_slot_when_snmp_returns_supply_for_slot(): void
+    public function test_scheduled_poll_does_not_auto_create_for_awaiting_slot(): void
     {
         $printer = $this->makePrinter('192.168.1.41');
         $supply = $this->createActiveSupply($printer, '1', 40);
@@ -62,10 +62,33 @@ class TonerSupplyServiceWorkflowTest extends TestCase
 
         $printer->refresh();
 
+        // Slot stays empty until user explicitly requests a poll that creates provisionals.
+        $this->assertSame(['1'], $printer->awaiting_slot_poll_keys);
+        $this->assertCount(0, $printer->tonerSupplies);
+    }
+
+    public function test_manual_poll_with_flag_creates_provisional_for_awaiting_slot(): void
+    {
+        $printer = $this->makePrinter('192.168.1.42');
+        $supply = $this->createActiveSupply($printer, '1', 40);
+
+        app(TonerSupplyIdentityService::class)->sendActiveToService($supply, 'black', 'На заправку');
+
+        $service = $this->makePollingService();
+
+        $service->syncFromDiscovery(
+            $printer->fresh(),
+            $this->discovery([$this->unknownSupply('1', 'black', 'Non-OEM')]),
+            createProvisionalForEmptySlots: true,
+        );
+
+        $printer->refresh();
+
         $this->assertSame([], $printer->awaiting_slot_poll_keys ?? []);
         $this->assertCount(1, $printer->tonerSupplies);
         $this->assertSame('Non-OEM', $printer->tonerSupplies->first()?->snmp_description);
         $this->assertFalse($printer->tonerSupplies->first()?->is_known);
+        $this->assertTrue($printer->tonerSupplies->first()?->needs_identity_confirmation);
     }
 
     public function test_ordered_display_items_keep_slot_order_between_active_and_placeholder(): void
