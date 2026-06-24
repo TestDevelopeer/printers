@@ -11,10 +11,17 @@ return new class extends Migration
     {
         $driver = DB::connection()->getDriverName();
 
-        Schema::table('toner_supplies', function (Blueprint $table) use ($driver): void {
-            if ($driver !== 'sqlite') {
-                $table->dropForeign(['printer_id']);
-            }
+        if ($driver === 'pgsql') {
+            DB::statement('ALTER TABLE toner_supplies ALTER COLUMN printer_id DROP NOT NULL');
+            DB::statement('ALTER TABLE toner_supplies DROP CONSTRAINT IF EXISTS toner_supplies_printer_id_foreign');
+            DB::statement('ALTER TABLE toner_supplies ADD CONSTRAINT toner_supplies_printer_id_foreign FOREIGN KEY (printer_id) REFERENCES printers(id) ON DELETE SET NULL');
+
+            DB::statement('UPDATE toner_supplies SET printer_id = NULL WHERE is_on_service = true');
+
+            return;
+        }
+
+        Schema::table('toner_supplies', function (Blueprint $table): void {
             $table->dropIndex(['printer_id', 'removed_at']);
             $table->dropIndex(['printer_id', 'slot_key']);
             $table->dropIndex(['printer_id', 'supply_signature']);
@@ -39,17 +46,22 @@ return new class extends Migration
     {
         $driver = DB::connection()->getDriverName();
 
-        Schema::table('toner_supplies', function (Blueprint $table) use ($driver): void {
-            if ($driver !== 'sqlite') {
-                $table->dropForeign(['printer_id']);
-            }
-            $table->dropIndex(['printer_id', 'slot_key']);
-            $table->dropConstrainedForeignId('printer_id');
-        });
-
         DB::table('toner_supplies')
             ->whereNull('printer_id')
             ->update(['printer_id' => 0]);
+
+        if ($driver === 'pgsql') {
+            DB::statement('ALTER TABLE toner_supplies DROP CONSTRAINT IF EXISTS toner_supplies_printer_id_foreign');
+            DB::statement('ALTER TABLE toner_supplies ALTER COLUMN printer_id SET NOT NULL');
+            DB::statement('ALTER TABLE toner_supplies ADD CONSTRAINT toner_supplies_printer_id_foreign FOREIGN KEY (printer_id) REFERENCES printers(id) ON DELETE CASCADE');
+
+            return;
+        }
+
+        Schema::table('toner_supplies', function (Blueprint $table): void {
+            $table->dropIndex(['printer_id', 'slot_key']);
+            $table->dropConstrainedForeignId('printer_id');
+        });
 
         Schema::table('toner_supplies', function (Blueprint $table): void {
             $table->foreignId('printer_id')
