@@ -88,6 +88,11 @@ class PrinterInfolist {
                                 Group::make([
                                     TextEntry::make('display_name')
                                         ->label('Название'),
+                                    TextEntry::make('id')
+                                        ->label('ID в базе'),
+                                    ViewEntry::make('percentage')
+                                        ->label('% тонера')
+                                        ->view('filament.infolists.entries.toner-progress'),
                                     TextEntry::make('comment_display')
                                         ->label('Комментарий')
                                         ->placeholder('Без комментария')
