@@ -24,6 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=composer:2.8 /usr/bin/composer /usr/bin/composer
 COPY . .
 
+# Override php-fpm pool config: higher memory_limit for Filament pages
+RUN mkdir -p /usr/local/etc/php-fpm.d && \
+    cp docker/app/php-fpm-overrides.conf /usr/local/etc/php-fpm.d/zz-overrides.conf
+
 RUN rm -f bootstrap/cache/*.php \
     && composer install \
         --no-dev \

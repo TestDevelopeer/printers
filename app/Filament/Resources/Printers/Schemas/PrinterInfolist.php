@@ -101,7 +101,7 @@ class PrinterInfolist
                             ->label('Ожидают опроса')
                             ->state(fn (Printer $record) => $record->awaiting_slot_placeholders)
                             ->contained(true)
-                            ->placeholder(false)
+                            ->placeholder(null)
                             ->schema([
                                 Group::make([
                                     TextEntry::make('slot_key')
@@ -225,10 +225,18 @@ class PrinterInfolist
                     ->live(),
                 Select::make('service_supply_id')
                     ->label('Картридж из пула')
-                    ->options(fn (): array => TonerSupply::query()
+                    ->helperText('Начните вводить номер, описание или комментарий для поиска')
+                    ->searchable()
+                    ->getSearchResultsUsing(fn (string $search): array => TonerSupply::query()
                         ->onService()
+                        ->where(function ($query) use ($search): void {
+                            $query->where('snmp_description', 'like', "%{$search}%")
+                                ->orWhere('comment', 'like', "%{$search}%")
+                                ->orWhere('id', 'like', "%{$search}%");
+                        })
                         ->orderBy('color')
                         ->orderBy('snmp_description')
+                        ->limit(50)
                         ->get()
                         ->mapWithKeys(fn (TonerSupply $supply): array => [
                             $supply->getKey() => sprintf(
@@ -239,6 +247,11 @@ class PrinterInfolist
                             ),
                         ])
                         ->all())
+                    ->getOptionLabelUsing(fn (mixed $value): ?string => TonerSupply::query()
+                        ->onService()
+                        ->whereKey($value)
+                        ->first()
+                        ?->display_name)
                     ->visible(fn (Get $get): bool => $get('choice_type') === 'service')
                     ->required(fn (Get $get): bool => $get('choice_type') === 'service'),
                 Textarea::make('comment')
@@ -295,10 +308,18 @@ class PrinterInfolist
                 Hidden::make('slot_key'),
                 Select::make('service_supply_id')
                     ->label('Картридж из пула')
-                    ->options(fn (): array => TonerSupply::query()
+                    ->helperText('Начните вводить номер, описание или комментарий для поиска')
+                    ->searchable()
+                    ->getSearchResultsUsing(fn (string $search): array => TonerSupply::query()
                         ->onService()
+                        ->where(function ($query) use ($search): void {
+                            $query->where('snmp_description', 'like', "%{$search}%")
+                                ->orWhere('comment', 'like', "%{$search}%")
+                                ->orWhere('id', 'like', "%{$search}%");
+                        })
                         ->orderBy('color')
                         ->orderBy('snmp_description')
+                        ->limit(50)
                         ->get()
                         ->mapWithKeys(fn (TonerSupply $supply): array => [
                             $supply->getKey() => sprintf(
@@ -309,6 +330,11 @@ class PrinterInfolist
                             ),
                         ])
                         ->all())
+                    ->getOptionLabelUsing(fn (mixed $value): ?string => TonerSupply::query()
+                        ->onService()
+                        ->whereKey($value)
+                        ->first()
+                        ?->display_name)
                     ->required(),
             ])
             ->action(function (array $data, $livewire): void {
