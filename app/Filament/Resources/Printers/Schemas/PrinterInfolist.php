@@ -27,15 +27,13 @@ use Filament\Schemas\Schema;
 use InvalidArgumentException;
 use Throwable;
 
-class PrinterInfolist
-{
-    public static function configure(Schema $schema): Schema
-    {
+class PrinterInfolist {
+    public static function configure(Schema $schema): Schema {
         return $schema
             ->components([
                 Section::make('Фоновый опрос')
-                    ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
-                    ->visible(fn (Printer $record): bool => (bool) $record->is_polling)
+                    ->poll(fn(Printer $record): ?string => $record->is_polling ? '5s' : null)
+                    ->visible(fn(Printer $record): bool => (bool) $record->is_polling)
                     ->schema([
                         TextEntry::make('manual_poll_requested_at')
                             ->label('Состояние')
@@ -52,12 +50,12 @@ class PrinterInfolist
                             ->badge()
                             ->color('warning'),
                     ]),
-                Section::make('Тонеры')
-                    ->poll(fn (Printer $record): ?string => $record->is_polling ? '5s' : null)
+                Section::make('Картриджи')
+                    ->poll(fn(Printer $record): ?string => $record->is_polling ? '5s' : null)
                     ->schema([
                         RepeatableEntry::make('displayed_toner_supplies')
                             ->label('')
-                            ->state(fn (Printer $record) => $record->displayed_toner_supplies)
+                            ->state(fn(Printer $record) => $record->displayed_toner_supplies)
                             ->contained(true)
                             ->placeholder('Активные картриджи не найдены. Свободные картриджи доступны на странице «Картриджи».')
                             ->schema([
@@ -69,23 +67,23 @@ class PrinterInfolist
                                     TextEntry::make('color_label')
                                         ->label('Цвет')
                                         ->badge()
-                                        ->state(fn (TonerSupply $record): string => $record->color_label)
-                                        ->color(fn (TonerSupply $record): string => $record->color_badge_color),
+                                        ->state(fn(TonerSupply $record): string => $record->color_label)
+                                        ->color(fn(TonerSupply $record): string => $record->color_badge_color),
                                     TextEntry::make('status_label')
                                         ->label('Статус')
-                                        ->state(fn (TonerSupply $record): string => $record->status_label)
+                                        ->state(fn(TonerSupply $record): string => $record->status_label)
                                         ->badge()
-                                        ->color(fn (TonerSupply $record): string => $record->isLow() ? 'danger' : ($record->percentage === null ? 'warning' : 'success')),
+                                        ->color(fn(TonerSupply $record): string => $record->isLow() ? 'danger' : ($record->percentage === null ? 'warning' : 'success')),
                                     TextEntry::make('identity_pending')
                                         ->label('Подтверждение')
                                         ->state('Картридж заменён — выберите из пула')
                                         ->badge()
                                         ->color('warning')
-                                        ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation),
+                                        ->visible(fn(TonerSupply $record): bool => $record->needs_identity_confirmation),
                                     Actions::make([
                                         self::chooseCartridgeIdentityAction(),
                                     ])
-                                        ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation),
+                                        ->visible(fn(TonerSupply $record): bool => $record->needs_identity_confirmation),
                                 ])->columnSpan(1),
                                 Group::make([
                                     TextEntry::make('display_name')
@@ -99,7 +97,7 @@ class PrinterInfolist
                             ->columns(2),
                         RepeatableEntry::make('awaiting_slot_placeholders')
                             ->label('Ожидают опроса')
-                            ->state(fn (Printer $record) => $record->awaiting_slot_placeholders)
+                            ->state(fn(Printer $record) => $record->awaiting_slot_placeholders)
                             ->contained(true)
                             ->placeholder(null)
                             ->schema([
@@ -136,13 +134,13 @@ class PrinterInfolist
                         TextEntry::make('status')
                             ->label('Статус')
                             ->badge()
-                            ->formatStateUsing(fn ($state) => $state?->label() ?? 'Неизвестно')
-                            ->color(fn ($state) => $state?->color() ?? 'warning'),
+                            ->formatStateUsing(fn($state) => $state?->label() ?? 'Неизвестно')
+                            ->color(fn($state) => $state?->color() ?? 'warning'),
                         TextEntry::make('last_error')->label('Последняя ошибка')->placeholder('Ошибок нет'),
                     ])
                     ->columns(2)
                     ->collapsible()
-                    ->collapsed(),
+                    ->collapsed(false),
                 Section::make('Сеть')
                     ->schema([
                         TextEntry::make('ip_address')->label('IP-адрес'),
@@ -162,9 +160,9 @@ class PrinterInfolist
                     ->schema([
                         TextEntry::make('is_active')
                             ->label('Активен')
-                            ->formatStateUsing(fn ($state) => $state ? 'Да' : 'Нет')
+                            ->formatStateUsing(fn($state) => $state ? 'Да' : 'Нет')
                             ->badge()
-                            ->color(fn ($state) => $state ? 'success' : 'gray'),
+                            ->color(fn($state) => $state ? 'success' : 'gray'),
                         TextEntry::make('created_at')
                             ->label('Создан')
                             ->dateTime()
@@ -177,33 +175,10 @@ class PrinterInfolist
                     ->columns(3)
                     ->collapsible()
                     ->collapsed(),
-                Section::make('Логи опроса')
-                    ->schema([
-                        RepeatableEntry::make('pollLogs')
-                            ->label('')
-                            ->schema([
-                                TextEntry::make('started_at')
-                                    ->label('Начало')
-                                    ->dateTime(),
-                                TextEntry::make('finished_at')
-                                    ->label('Конец')
-                                    ->dateTime(),
-                                TextEntry::make('status')
-                                    ->label('Статус'),
-                                TextEntry::make('error')
-                                    ->label('Ошибка')
-                                    ->placeholder('—'),
-                            ])
-                            ->columns(4)
-                            ->contained(false),
-                    ])
-                    ->collapsible()
-                    ->collapsed(),
             ]);
     }
 
-    private static function chooseCartridgeIdentityAction(): Action
-    {
+    private static function chooseCartridgeIdentityAction(): Action {
         return Action::make('choose_cartridge_identity')
             ->button()
             ->icon('heroicon-m-queue-list')
@@ -212,7 +187,7 @@ class PrinterInfolist
             ->size('sm')
             ->modalHeading('Выбор картриджа для слота')
             ->modalDescription('Выберите картридж из пула на обслуживании или сохраните текущий как новый.')
-            ->visible(fn (TonerSupply $record): bool => $record->needs_identity_confirmation)
+            ->visible(fn(TonerSupply $record): bool => $record->needs_identity_confirmation)
             ->schema([
                 Select::make('choice_type')
                     ->label('Действие')
@@ -227,7 +202,7 @@ class PrinterInfolist
                     ->label('Картридж из пула')
                     ->helperText('Начните вводить номер, описание или комментарий для поиска')
                     ->searchable()
-                    ->getSearchResultsUsing(fn (string $search): array => TonerSupply::query()
+                    ->getSearchResultsUsing(fn(string $search): array => TonerSupply::query()
                         ->onService()
                         ->where(function ($query) use ($search): void {
                             $query->where('snmp_description', 'like', "%{$search}%")
@@ -238,7 +213,7 @@ class PrinterInfolist
                         ->orderBy('snmp_description')
                         ->limit(50)
                         ->get()
-                        ->mapWithKeys(fn (TonerSupply $supply): array => [
+                        ->mapWithKeys(fn(TonerSupply $supply): array => [
                             $supply->getKey() => sprintf(
                                 '#%d — %s — %s',
                                 $supply->getKey(),
@@ -247,18 +222,18 @@ class PrinterInfolist
                             ),
                         ])
                         ->all())
-                    ->getOptionLabelUsing(fn (mixed $value): ?string => TonerSupply::query()
+                    ->getOptionLabelUsing(fn(mixed $value): ?string => TonerSupply::query()
                         ->onService()
                         ->whereKey($value)
                         ->first()
                         ?->display_name)
-                    ->visible(fn (Get $get): bool => $get('choice_type') === 'service')
-                    ->required(fn (Get $get): bool => $get('choice_type') === 'service'),
+                    ->visible(fn(Get $get): bool => $get('choice_type') === 'service')
+                    ->required(fn(Get $get): bool => $get('choice_type') === 'service'),
                 Textarea::make('comment')
                     ->label('Комментарий для нового картриджа')
                     ->rows(3)
-                    ->visible(fn (Get $get): bool => $get('choice_type') === 'new')
-                    ->required(fn (Get $get): bool => $get('choice_type') === 'new'),
+                    ->visible(fn(Get $get): bool => $get('choice_type') === 'new')
+                    ->required(fn(Get $get): bool => $get('choice_type') === 'new'),
             ])
             ->action(function (TonerSupply $record, array $data): void {
                 $printer = $record->printer;
@@ -291,8 +266,7 @@ class PrinterInfolist
             });
     }
 
-    private static function chooseCartridgeForAwaitingSlotAction(): Action
-    {
+    private static function chooseCartridgeForAwaitingSlotAction(): Action {
         return Action::make('choose_cartridge_for_awaiting_slot')
             ->button()
             ->icon('heroicon-m-queue-list')
@@ -301,7 +275,7 @@ class PrinterInfolist
             ->size('sm')
             ->modalHeading('Выбор картриджа для слота')
             ->modalDescription('Выберите картридж из пула на обслуживании. Текущий активный картридж слота будет отправлен на обслуживание.')
-            ->fillForm(fn (array $record): array => [
+            ->fillForm(fn(array $record): array => [
                 'slot_key' => (string) ($record['slot_key'] ?? ''),
             ])
             ->schema([
@@ -310,7 +284,7 @@ class PrinterInfolist
                     ->label('Картридж из пула')
                     ->helperText('Начните вводить номер, описание или комментарий для поиска')
                     ->searchable()
-                    ->getSearchResultsUsing(fn (string $search): array => TonerSupply::query()
+                    ->getSearchResultsUsing(fn(string $search): array => TonerSupply::query()
                         ->onService()
                         ->where(function ($query) use ($search): void {
                             $query->where('snmp_description', 'like', "%{$search}%")
@@ -321,7 +295,7 @@ class PrinterInfolist
                         ->orderBy('snmp_description')
                         ->limit(50)
                         ->get()
-                        ->mapWithKeys(fn (TonerSupply $supply): array => [
+                        ->mapWithKeys(fn(TonerSupply $supply): array => [
                             $supply->getKey() => sprintf(
                                 '#%d — %s — %s',
                                 $supply->getKey(),
@@ -330,7 +304,7 @@ class PrinterInfolist
                             ),
                         ])
                         ->all())
-                    ->getOptionLabelUsing(fn (mixed $value): ?string => TonerSupply::query()
+                    ->getOptionLabelUsing(fn(mixed $value): ?string => TonerSupply::query()
                         ->onService()
                         ->whereKey($value)
                         ->first()
@@ -369,8 +343,7 @@ class PrinterInfolist
             });
     }
 
-    private static function refreshPrinterAction(): Action
-    {
+    private static function refreshPrinterAction(): Action {
         return Action::make('refresh_printer_for_slot')
             ->button()
             ->icon('heroicon-m-arrow-path')
@@ -407,8 +380,7 @@ class PrinterInfolist
             });
     }
 
-    private static function editActiveSupplyMetadataAction(): Action
-    {
+    private static function editActiveSupplyMetadataAction(): Action {
         return Action::make('edit_active_supply_metadata')
             ->icon('heroicon-m-pencil-square')
             ->label('Изменить')
@@ -433,7 +405,7 @@ class PrinterInfolist
                     ->label('Комментарий')
                     ->rows(3),
             ])
-            ->fillForm(fn (TonerSupply $record): array => [
+            ->fillForm(fn(TonerSupply $record): array => [
                 'color' => $record->color?->value ?? TonerColor::Unknown->value,
                 'comment' => $record->comment,
                 'is_on_service' => false,
@@ -479,8 +451,7 @@ class PrinterInfolist
     /**
      * @return array<string, string>
      */
-    private static function colorOptions(): array
-    {
+    private static function colorOptions(): array {
         $options = [];
 
         foreach (TonerColor::cases() as $color) {
