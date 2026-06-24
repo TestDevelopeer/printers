@@ -121,9 +121,7 @@ class PrinterInfolist
                                         ->suffixAction(self::chooseCartridgeForAwaitingSlotAction()),
                                 ])->columnSpan(1),
                             ])
-                            ->columns(2)
-                            ->collapsible()
-                            ->collapsed(false),
+                            ->columns(2),
                     ])
                     ->collapsible()
                     ->collapsed(false),

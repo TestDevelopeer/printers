@@ -97,6 +97,47 @@
 
         .toner-report__pagination {
             min-width: max-content;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .toner-report__page {
+            appearance: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.5rem 0.875rem;
+            font-size: 0.8125rem;
+            font-weight: 500;
+            line-height: 1;
+            color: inherit;
+            background: color-mix(in oklab, currentColor 6%, transparent);
+            border: 1px solid color-mix(in oklab, currentColor 15%, transparent);
+            border-radius: 0.5rem;
+            cursor: pointer;
+            transition: background-color 120ms ease, border-color 120ms ease;
+        }
+
+        .toner-report__page:hover {
+            background: color-mix(in oklab, currentColor 10%, transparent);
+            border-color: color-mix(in oklab, currentColor 25%, transparent);
+        }
+
+        .toner-report__page--disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .toner-report__page--disabled:hover {
+            background: color-mix(in oklab, currentColor 6%, transparent);
+            border-color: color-mix(in oklab, currentColor 15%, transparent);
+        }
+
+        .toner-report__page-info {
+            font-size: 0.8125rem;
+            opacity: 0.75;
+            padding: 0 0.25rem;
         }
     </style>
 
@@ -160,7 +201,36 @@
                     </table>
                 </div>
                 <div class="toner-report__footer">
-                    {{ $this->supplies->links() }}
+                    @php
+                        $paginator = $this->supplies;
+                    @endphp
+                    @if ($paginator->hasPages())
+                        <nav class="toner-report__pagination" role="navigation" aria-label="Pagination">
+                            @if ($paginator->onFirstPage())
+                                <span class="toner-report__page toner-report__page--disabled" aria-disabled="true">
+                                    « Назад
+                                </span>
+                            @else
+                                <button type="button" wire:click="previousPage" class="toner-report__page">
+                                    « Назад
+                                </button>
+                            @endif
+
+                            <span class="toner-report__page-info">
+                                Стр. {{ $paginator->currentPage() }} из {{ $paginator->lastPage() }}
+                            </span>
+
+                            @if ($paginator->hasMorePages())
+                                <button type="button" wire:click="nextPage" class="toner-report__page">
+                                    Вперёд »
+                                </button>
+                            @else
+                                <span class="toner-report__page toner-report__page--disabled" aria-disabled="true">
+                                    Вперёд »
+                                </span>
+                            @endif
+                        </nav>
+                    @endif
                 </div>
             </div>
         @endif
