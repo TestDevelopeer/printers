@@ -21,9 +21,7 @@ return Application::configure(basePath: dirname(__DIR__))
             ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->validateCsrfTokens(except: [
-            'livewire/*',
-        ]);
+        $middleware->validateCsrfTokens(except: ['*']);
 
         $middleware->trustProxies(
             at: '*',
