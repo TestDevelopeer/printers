@@ -23,7 +23,7 @@ class PrinterSnmpService
     private const SUPPLIES_LEVEL = '1.3.6.1.2.1.43.11.1.1.9.1';
     private const SUPPLIES_CAPACITY = '1.3.6.1.2.1.43.11.1.1.8.1';
     private const COLORANT_VALUE = '1.3.6.1.2.1.43.12.1.1.4.1';
-    private const PRT_MARKER_LIFE_COUNT = '1.3.6.1.2.1.43.10.2.1.4.1';
+    private const PRT_MARKER_LIFE_COUNT_BASE = '1.3.6.1.2.1.43.10.2.1.4';
 
     /**
      * @return array{description: ?string, hostname: ?string, printer_name: ?string}|null
@@ -202,13 +202,36 @@ class PrinterSnmpService
         int $timeoutMs,
         ?SnmpDumpBuilder $dumpBuilder = null,
     ): array {
-        $value = $this->snmpGet($ipAddress, self::PRT_MARKER_LIFE_COUNT, $community, $timeoutMs, $dumpBuilder);
+        // Try the first marker index directly first (fast path).
+        $value = $this->snmpGet($ipAddress, self::PRT_MARKER_LIFE_COUNT_BASE.'.1', $community, $timeoutMs, $dumpBuilder);
 
-        if ($value === null || ! is_numeric($value)) {
+        if ($value !== null && is_numeric($value)) {
+            return [(int) $value, self::PRT_MARKER_LIFE_COUNT_BASE.'.1'];
+        }
+
+        // Fallback: walk the entire prtMarkerLifeCount table. Some printers expose
+        // the lifetime counter only on .2+.1 or on multiple marker indices.
+        $walk = $this->snmpWalk($ipAddress, self::PRT_MARKER_LIFE_COUNT_BASE, $community, $timeoutMs, $dumpBuilder);
+
+        if ($walk === []) {
             return [null, null];
         }
 
-        return [(int) $value, self::PRT_MARKER_LIFE_COUNT];
+        $total = 0;
+        $found = false;
+        foreach ($walk as $oid => $raw) {
+            if (! is_numeric($raw)) {
+                continue;
+            }
+            $total += (int) $raw;
+            $found = true;
+        }
+
+        if (! $found) {
+            return [null, null];
+        }
+
+        return [$total, self::PRT_MARKER_LIFE_COUNT_BASE];
     }
 
     /**
