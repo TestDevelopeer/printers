@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\PrinterStatus;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -70,6 +71,20 @@ class Printer extends Model
     public function pollLogs(): HasMany
     {
         return $this->hasMany(PrinterPollLog::class)->latest('started_at');
+    }
+
+    public function meterReadings(): HasMany
+    {
+        return $this->hasMany(PrinterMeterReading::class)
+            ->orderBy('reading_date')
+            ->orderBy('recorded_at');
+    }
+
+    public function latestMeterReading(): HasOne
+    {
+        return $this->hasOne(PrinterMeterReading::class)
+            ->where('source', PrinterMeterReading::SOURCE_POLL)
+            ->latestOfMany(['reading_date', 'recorded_at']);
     }
 
     public function getDisplayNameAttribute(): string

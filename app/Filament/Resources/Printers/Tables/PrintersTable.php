@@ -113,11 +113,11 @@ class PrintersTable
                         ])->save();
 
                         try {
-                            PollPrinterJob::dispatchSync($record->id, 'manual');
+                            PollPrinterJob::dispatch($record->id, 'manual');
 
                             Notification::make()
-                                ->title('Опрос выполнен')
-                                ->body("Принтер {$record->display_name} опрошен, запись добавлена в логи.")
+                                ->title('Опрос поставлен в очередь')
+                                ->body("Принтер {$record->display_name} поставлен в очередь на опрос. Результат будет в логах.")
                                 ->success()
                                 ->send();
                         } catch (Throwable $exception) {

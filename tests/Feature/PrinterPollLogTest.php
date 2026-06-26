@@ -64,6 +64,7 @@ class PrinterPollLogTest extends TestCase
                                 'description' => 'TK-5240K',
                             ],
                         ]],
+                        totalPages: 12345,
                     ),
                     dump: [
                         'ip_address' => $ipAddress,
@@ -94,6 +95,13 @@ class PrinterPollLogTest extends TestCase
         $this->assertNotNull($log->raw_snmp_dump);
         $this->assertNotNull($log->normalized_payload);
         $this->assertArrayHasKey('discovered', $log->normalized_payload);
+
+        $meter = \App\Models\PrinterMeterReading::query()
+            ->where('printer_id', $printer->id)
+            ->where('source', \App\Models\PrinterMeterReading::SOURCE_POLL)
+            ->first();
+        $this->assertNotNull($meter);
+        $this->assertSame(12345, $meter->total_pages);
     }
 
     public function test_scheduled_poll_job_writes_offline_log_with_payload(): void

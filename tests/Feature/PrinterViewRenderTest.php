@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Enums\PrinterStatus;
 use App\Enums\TonerColor;
 use App\Models\Printer;
+use App\Models\PrinterMeterReading;
 use App\Models\TonerSupply;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -79,6 +80,24 @@ class PrinterViewRenderTest extends TestCase
 
         $this->actingAs($user)
             ->get("/admin/printers/{$printer->id}")
+            ->assertOk();
+    }
+
+    public function test_printer_view_renders_with_meter_readings(): void
+    {
+        $user = User::factory()->create();
+        $printer = $this->makePrinter();
+        $service = app(\App\Services\Printers\MeterReadingService::class);
+
+        $today = \Illuminate\Support\Carbon::today();
+        for ($i = 0; $i < 7; $i++) {
+            \Illuminate\Support\Carbon::setTestNow($today->copy()->subDays($i)->setTime(10, 0));
+            $service->recordPoll($printer, 1000 + ($i * 10));
+        }
+        \Illuminate\Support\Carbon::setTestNow();
+
+        $this->actingAs($user)
+            ->get('/admin/printers/'.$printer->id)
             ->assertOk();
     }
 

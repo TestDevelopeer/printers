@@ -7,6 +7,7 @@ use App\Enums\TonerColor;
 use App\Models\Printer;
 use App\Models\PrinterPollLog;
 use App\Models\TonerSupply;
+use App\Services\Printers\MeterReadingService;
 use App\Services\Printers\TonerSupplyIdentityService;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Hidden;
@@ -130,6 +131,26 @@ class PrinterInfolist {
                             ])
                             ->columns(2),
                     ])
+                    ->collapsible()
+                    ->collapsed(false),
+                Section::make('Счетчики')
+                    ->poll(fn(Printer $record): ?string => $record->is_polling ? '5s' : null)
+                    ->schema([
+                        TextEntry::make('total_pages_display')
+                            ->label('Всего страниц (lifetime)')
+                            ->state(fn(Printer $record): ?string => $record->latestMeterReading?->total_pages !== null
+                                ? number_format($record->latestMeterReading->total_pages, 0, '.', ' ')
+                                : null)
+                            ->placeholder('Нет данных')
+                            ->helperText('Суммарное значение SNMP prtMarkerLifeCount на момент последнего опроса.'),
+                        ViewEntry::make('meter_breakdown')
+                            ->label('Разбивка за последние 7 дней')
+                            ->view('filament.resources.printers.meter-breakdown')
+                            ->viewData(fn(Printer $record): array => [
+                                'breakdown' => app(MeterReadingService::class)->getDailyBreakdown($record, 7),
+                            ]),
+                    ])
+                    ->columns(2)
                     ->collapsible()
                     ->collapsed(false),
                 Section::make('Общие')
@@ -306,8 +327,8 @@ class PrinterInfolist {
                     ManualPrinterPoll::run($printer, createProvisionalForEmptySlots: true);
 
                     Notification::make()
-                        ->title('Опрос выполнен')
-                        ->body("Принтер {$printer->display_name} опрошен.")
+                        ->title('Опрос поставлен в очередь')
+                        ->body("Принтер {$printer->display_name} поставлен в очередь на опрос. Результат будет в логах.")
                         ->success()
                         ->send();
                 } catch (Throwable $exception) {

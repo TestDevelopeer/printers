@@ -19,6 +19,7 @@ class PrinterPollingService
     public function __construct(
         private readonly PrinterSnmpService $printerSnmpService,
         private readonly PrinterAlertService $printerAlertService,
+        private readonly MeterReadingService $meterReadingService = new MeterReadingService(),
     ) {
     }
 
@@ -58,6 +59,8 @@ class PrinterPollingService
                 $discovery->isPartialResponse,
                 $createProvisionalForEmptySlots,
             );
+
+            $this->meterReadingService->recordPoll($printer, $discovery->discovered->totalPages);
 
             return new PrinterPollResult(
                 printer: $printer,

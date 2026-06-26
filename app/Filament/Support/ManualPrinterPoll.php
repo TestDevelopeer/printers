@@ -18,7 +18,7 @@ class ManualPrinterPoll
             'manual_poll_requested_at' => now(),
         ])->save();
 
-        PollPrinterJob::dispatchSync($printer->getKey(), 'manual', $createProvisionalForEmptySlots);
+        PollPrinterJob::dispatch($printer->getKey(), 'manual', $createProvisionalForEmptySlots);
 
         $printer->refresh();
     }

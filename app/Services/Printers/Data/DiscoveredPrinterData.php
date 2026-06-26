@@ -20,6 +20,8 @@ final readonly class DiscoveredPrinterData
         public array $tonerSupplies = [],
         public string $snmpCommunity = 'public',
         public string $snmpVersion = '2c',
+        public ?int $totalPages = null,
+        public ?string $totalPagesOid = null,
     ) {
     }
 
@@ -39,6 +41,8 @@ final readonly class DiscoveredPrinterData
             'location' => $this->location,
             'snmp_community' => $this->snmpCommunity,
             'snmp_version' => $this->snmpVersion,
+            'total_pages' => $this->totalPages,
+            'total_pages_oid' => $this->totalPagesOid,
         ];
     }
 
@@ -60,6 +64,8 @@ final readonly class DiscoveredPrinterData
             'toner_supplies' => $this->tonerSupplies,
             'snmp_community' => $this->snmpCommunity,
             'snmp_version' => $this->snmpVersion,
+            'total_pages' => $this->totalPages,
+            'total_pages_oid' => $this->totalPagesOid,
         ];
     }
 
@@ -81,6 +87,8 @@ final readonly class DiscoveredPrinterData
             tonerSupplies: $data['toner_supplies'] ?? [],
             snmpCommunity: $data['snmp_community'] ?? config('printers.default_snmp_community', 'public'),
             snmpVersion: $data['snmp_version'] ?? config('printers.default_snmp_version', '2c'),
+            totalPages: isset($data['total_pages']) && is_numeric($data['total_pages']) ? (int) $data['total_pages'] : null,
+            totalPagesOid: $data['total_pages_oid'] ?? null,
         );
     }
 }

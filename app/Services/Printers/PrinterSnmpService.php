@@ -23,6 +23,7 @@ class PrinterSnmpService
     private const SUPPLIES_LEVEL = '1.3.6.1.2.1.43.11.1.1.9.1';
     private const SUPPLIES_CAPACITY = '1.3.6.1.2.1.43.11.1.1.8.1';
     private const COLORANT_VALUE = '1.3.6.1.2.1.43.12.1.1.4.1';
+    private const PRT_MARKER_LIFE_COUNT = '1.3.6.1.2.1.43.10.2.1.4.1';
 
     /**
      * @return array{description: ?string, hostname: ?string, printer_name: ?string}|null
@@ -85,6 +86,8 @@ class PrinterSnmpService
 
         $tonerSupplies = $this->readTonerSupplies($ipAddress, $community, $timeoutMs, $dumpBuilder);
 
+        [$totalPages, $totalPagesOid] = $this->readMeterCounter($ipAddress, $community, $timeoutMs, $dumpBuilder);
+
         $dump = $dumpBuilder->toArray($ipAddress, $community, $timeoutMs);
         $isPartial = $dumpBuilder->hasFailedRequests()
             || $dumpBuilder->hasEmptyWalksWithData()
@@ -120,6 +123,8 @@ class PrinterSnmpService
                 tonerSupplies: $tonerSupplies,
                 snmpCommunity: $community,
                 snmpVersion: config('printers.default_snmp_version', '2c'),
+                totalPages: $totalPages,
+                totalPagesOid: $totalPagesOid,
             ),
             dump: $dump,
             isPartialResponse: $isPartial,
@@ -184,6 +189,26 @@ class PrinterSnmpService
         $dumpBuilder?->recordWalk($oid, $normalized);
 
         return $normalized;
+    }
+
+    /**
+     * Read prtMarkerLifeCount (total printed pages, lifetime).
+     *
+     * @return array{0: ?int, 1: ?string}
+     */
+    private function readMeterCounter(
+        string $ipAddress,
+        string $community,
+        int $timeoutMs,
+        ?SnmpDumpBuilder $dumpBuilder = null,
+    ): array {
+        $value = $this->snmpGet($ipAddress, self::PRT_MARKER_LIFE_COUNT, $community, $timeoutMs, $dumpBuilder);
+
+        if ($value === null || ! is_numeric($value)) {
+            return [null, null];
+        }
+
+        return [(int) $value, self::PRT_MARKER_LIFE_COUNT];
     }
 
     /**

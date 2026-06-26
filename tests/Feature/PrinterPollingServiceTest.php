@@ -373,6 +373,84 @@ class PrinterPollingServiceTest extends TestCase
         ];
     }
 
+    public function test_poll_does_not_record_meter_reading_when_printer_offline(): void
+    {
+        $printer = $this->makePrinter('192.168.1.99');
+
+        $snmp = new class extends PrinterSnmpService {
+            public function discoverWithDump(
+                string $ipAddress,
+                ?string $community = null,
+                ?int $timeoutMs = null,
+                ?array $probe = null,
+            ): \App\Services\Printers\Data\SnmpDiscoveryResult {
+                return new \App\Services\Printers\Data\SnmpDiscoveryResult(
+                    discovered: null,
+                    dump: [
+                        'ip_address' => $ipAddress,
+                        'gets' => [],
+                        'walks' => [],
+                    ],
+                    isPartialResponse: false,
+                    failureReason: 'SNMP timeout',
+                );
+            }
+        };
+
+        $service = new PrinterPollingService(
+            $snmp,
+            new PrinterAlertService(new TelegramBotService()),
+        );
+
+        $service->poll($printer);
+
+        $this->assertSame(0, \App\Models\PrinterMeterReading::query()
+            ->where('printer_id', $printer->id)
+            ->count());
+    }
+
+    public function test_poll_records_meter_reading_with_total_pages(): void
+    {
+        $printer = $this->makePrinter('192.168.1.100');
+
+        $snmp = new class extends PrinterSnmpService {
+            public function discoverWithDump(
+                string $ipAddress,
+                ?string $community = null,
+                ?int $timeoutMs = null,
+                ?array $probe = null,
+            ): \App\Services\Printers\Data\SnmpDiscoveryResult {
+                return new \App\Services\Printers\Data\SnmpDiscoveryResult(
+                    discovered: new DiscoveredPrinterData(
+                        ipAddress: $ipAddress,
+                        discoveredName: 'Test',
+                        tonerSupplies: [],
+                        totalPages: 54321,
+                    ),
+                    dump: [
+                        'ip_address' => $ipAddress,
+                        'gets' => [],
+                        'walks' => [],
+                    ],
+                );
+            }
+        };
+
+        $service = new PrinterPollingService(
+            $snmp,
+            new PrinterAlertService(new TelegramBotService()),
+        );
+
+        $service->poll($printer);
+
+        $reading = \App\Models\PrinterMeterReading::query()
+            ->where('printer_id', $printer->id)
+            ->where('source', \App\Models\PrinterMeterReading::SOURCE_POLL)
+            ->first();
+
+        $this->assertNotNull($reading);
+        $this->assertSame(54321, $reading->total_pages);
+    }
     private function makeService(): PrinterPollingService
     {
         return new PrinterPollingService(
