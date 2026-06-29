@@ -412,11 +412,29 @@ class PrinterInfolist {
                     throw new InvalidArgumentException('Картридж из пула не найден.');
                 }
 
-                app(TonerSupplyIdentityService::class)->installFromService(
-                    $printer,
-                    $slotKey,
-                    $serviceSupply,
-                );
+                try {
+                    app(TonerSupplyIdentityService::class)->installFromService(
+                        $printer,
+                        $slotKey,
+                        $serviceSupply,
+                    );
+                } catch (Throwable $exception) {
+                    if (function_exists('logger')) {
+                        logger()->error('installFromService failed in chooseCartridge action: ' . $exception->getMessage(), [
+                            'exception' => $exception,
+                            'printer_id' => $printer->getKey(),
+                            'slot_key' => $slotKey,
+                            'service_supply_id' => $serviceSupply->getKey(),
+                        ]);
+                    }
+                    Notification::make()
+                        ->title('Не удалось установить картридж')
+                        ->body($exception->getMessage())
+                        ->danger()
+                        ->send();
+
+                    return;
+                }
 
                 Notification::make()
                     ->title('Картридж установлен в слот')
