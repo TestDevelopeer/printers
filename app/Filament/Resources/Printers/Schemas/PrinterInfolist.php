@@ -315,10 +315,7 @@ class PrinterInfolist {
                     throw new InvalidArgumentException('Не удалось определить принтер.');
                 }
 
-                $mountedActions = $livewire->mountedActions ?? [];
-                $lastAction = end($mountedActions) ?: [];
-                $arguments = $lastAction['arguments'] ?? [];
-                $slotKey = (string) ($arguments['slot_key'] ?? '');
+                $slotKey = self::resolveAwaitingSlotKeyFromLivewire($livewire);
 
                 if ($slotKey === '') {
                     throw new InvalidArgumentException('Не удалось определить слот.');
@@ -353,10 +350,9 @@ class PrinterInfolist {
             ->size('sm')
             ->modalHeading('Выбор картриджа для слота')
             ->modalDescription('Выберите картридж из пула на обслуживании. Текущий активный картридж слота будет отправлен на обслуживание.')
-            ->fillForm(function ($record): array {
-                $record = is_array($record) ? $record : (array) $record;
+            ->fillForm(function (array $arguments, mixed $record): array {
                 return [
-                    'slot_key' => (string) ($record['slot_key'] ?? ''),
+                    'slot_key' => self::resolveAwaitingSlotKey($arguments, $record),
                 ];
             })
             ->schema([
@@ -400,7 +396,7 @@ class PrinterInfolist {
                 }
 
                 $state = $form instanceof \Filament\Forms\Form ? $form->getState() : (is_array($form) ? $form : []);
-                $slotKey = (string) ($state['slot_key'] ?? '');
+                $slotKey = self::resolveAwaitingSlotKeyFromLivewire($livewire, $state);
 
                 if ($slotKey === '') {
                     throw new InvalidArgumentException('Не удалось определить слот.');
@@ -546,6 +542,41 @@ class PrinterInfolist {
                     ->success()
                     ->send();
             });
+    }
+
+    /**
+     * @param  array<string, mixed>  $arguments
+     * @param  array<string, mixed>  $formState
+     */
+    private static function resolveAwaitingSlotKey(array $arguments, mixed $record = null, array $formState = []): string
+    {
+        $slotKey = (string) ($formState['slot_key'] ?? $arguments['slot_key'] ?? '');
+
+        if ($slotKey !== '') {
+            return $slotKey;
+        }
+
+        if (is_array($record)) {
+            $slotKey = (string) ($record['slot_key'] ?? '');
+
+            if ($slotKey !== '') {
+                return $slotKey;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * @param  array<string, mixed>  $formState
+     */
+    private static function resolveAwaitingSlotKeyFromLivewire(mixed $livewire, array $formState = []): string
+    {
+        $mountedActions = $livewire->mountedActions ?? [];
+        $lastAction = end($mountedActions) ?: [];
+        $arguments = is_array($lastAction['arguments'] ?? null) ? $lastAction['arguments'] : [];
+
+        return self::resolveAwaitingSlotKey($arguments, null, $formState);
     }
 
     /**
