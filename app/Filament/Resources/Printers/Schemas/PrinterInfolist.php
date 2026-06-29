@@ -111,7 +111,11 @@ class PrinterInfolist {
                                     TextEntry::make('slot_key')
                                         ->label('Слот')
                                         ->badge()
-                                        ->color('gray'),
+                                        ->color('gray')
+                                        ->suffixActions([
+                                            self::refreshPrinterForSlotAction(),
+                                            self::chooseCartridgeForAwaitingSlotAction(),
+                                        ]),
                                     TextEntry::make('hint')
                                         ->label('Состояние')
                                         ->state('Слот пуст, ожидается новый картридж')
@@ -121,12 +125,10 @@ class PrinterInfolist {
                                 Group::make([
                                     TextEntry::make('refresh')
                                         ->label('Опрос')
-                                        ->state('Создать картридж из SNMP-данных принтера')
-                                        ->suffixAction(self::refreshPrinterForSlotAction()),
+                                        ->state('Создать картридж из SNMP-данных принтера'),
                                     TextEntry::make('choose')
                                         ->label('Установка')
-                                        ->state('Выбрать картридж из пула на обслуживании')
-                                        ->suffixAction(self::chooseCartridgeForAwaitingSlotAction()),
+                                        ->state('Выбрать картридж из пула на обслуживании'),
                                 ])->columnSpan(1),
                             ])
                             ->columns(2),
@@ -308,14 +310,14 @@ class PrinterInfolist {
             ->modalDescription('Будет выполнен опрос принтера. Если в этом слоте есть данные SNMP, будет создан новый картридж для подтверждения.')
             ->requiresConfirmation()
             ->modalSubmitActionLabel('Опросить')
-            ->action(function ($livewire): void {
+            ->action(function (mixed $state, $livewire): void {
                 $printer = $livewire->getRecord();
 
                 if (! $printer instanceof Printer) {
                     throw new InvalidArgumentException('Не удалось определить принтер.');
                 }
 
-                $slotKey = self::resolveAwaitingSlotKeyFromLivewire($livewire);
+                $slotKey = self::resolveAwaitingSlotKey(state: $state);
 
                 if ($slotKey === '') {
                     throw new InvalidArgumentException('Не удалось определить слот.');
@@ -350,11 +352,9 @@ class PrinterInfolist {
             ->size('sm')
             ->modalHeading('Выбор картриджа для слота')
             ->modalDescription('Выберите картридж из пула на обслуживании. Текущий активный картридж слота будет отправлен на обслуживание.')
-            ->fillForm(function (array $arguments, mixed $record): array {
-                return [
-                    'slot_key' => self::resolveAwaitingSlotKey($arguments, $record),
-                ];
-            })
+            ->fillForm(fn (mixed $state): array => [
+                'slot_key' => self::resolveAwaitingSlotKey(state: $state),
+            ])
             ->schema([
                 Hidden::make('slot_key'),
                 Select::make('service_supply_id')
@@ -388,21 +388,29 @@ class PrinterInfolist {
                         ?->display_name)
                     ->required(),
             ])
-            ->action(function (mixed $form, $livewire): void {
+            ->action(function (array $data, mixed $state, $livewire): void {
                 $printer = $livewire->getRecord();
 
                 if (! $printer instanceof Printer) {
                     throw new InvalidArgumentException('Не удалось определить принтер.');
                 }
 
-                $state = $form instanceof \Filament\Forms\Form ? $form->getState() : (is_array($form) ? $form : []);
-                $slotKey = self::resolveAwaitingSlotKeyFromLivewire($livewire, $state);
+                $slotKey = self::resolveAwaitingSlotKey(
+                    formState: $data,
+                    state: $state,
+                );
 
                 if ($slotKey === '') {
-                    throw new InvalidArgumentException('Не удалось определить слот.');
+                    Notification::make()
+                        ->title('Не удалось определить слот')
+                        ->body('Обновите страницу и повторите действие.')
+                        ->danger()
+                        ->send();
+
+                    return;
                 }
 
-                $serviceSupply = TonerSupply::query()->find($state['service_supply_id'] ?? null);
+                $serviceSupply = TonerSupply::query()->find($data['service_supply_id'] ?? null);
 
                 if (! $serviceSupply instanceof TonerSupply) {
                     throw new InvalidArgumentException('Картридж из пула не найден.');
@@ -548,8 +556,16 @@ class PrinterInfolist {
      * @param  array<string, mixed>  $arguments
      * @param  array<string, mixed>  $formState
      */
-    private static function resolveAwaitingSlotKey(array $arguments, mixed $record = null, array $formState = []): string
-    {
+    private static function resolveAwaitingSlotKey(
+        array $arguments = [],
+        mixed $record = null,
+        array $formState = [],
+        mixed $state = null,
+    ): string {
+        if (is_string($state) && $state !== '') {
+            return $state;
+        }
+
         $slotKey = (string) ($formState['slot_key'] ?? $arguments['slot_key'] ?? '');
 
         if ($slotKey !== '') {
@@ -565,18 +581,6 @@ class PrinterInfolist {
         }
 
         return '';
-    }
-
-    /**
-     * @param  array<string, mixed>  $formState
-     */
-    private static function resolveAwaitingSlotKeyFromLivewire(mixed $livewire, array $formState = []): string
-    {
-        $mountedActions = $livewire->mountedActions ?? [];
-        $lastAction = end($mountedActions) ?: [];
-        $arguments = is_array($lastAction['arguments'] ?? null) ? $lastAction['arguments'] : [];
-
-        return self::resolveAwaitingSlotKey($arguments, null, $formState);
     }
 
     /**
