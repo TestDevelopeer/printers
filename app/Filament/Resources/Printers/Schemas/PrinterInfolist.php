@@ -353,9 +353,12 @@ class PrinterInfolist {
             ->size('sm')
             ->modalHeading('Выбор картриджа для слота')
             ->modalDescription('Выберите картридж из пула на обслуживании. Текущий активный картридж слота будет отправлен на обслуживание.')
-            ->fillForm(fn(array $record): array => [
-                'slot_key' => (string) ($record['slot_key'] ?? ''),
-            ])
+            ->fillForm(function ($record): array {
+                $record = is_array($record) ? $record : (array) $record;
+                return [
+                    'slot_key' => (string) ($record['slot_key'] ?? ''),
+                ];
+            })
             ->schema([
                 Hidden::make('slot_key'),
                 Select::make('service_supply_id')

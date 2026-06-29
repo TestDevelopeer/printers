@@ -6,6 +6,8 @@ use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
+use Illuminate\Session\TokenMismatchException;
 use Symfony\Component\HttpFoundation\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -21,6 +23,8 @@ return Application::configure(basePath: dirname(__DIR__))
             ->withoutOverlapping();
     })
     ->withMiddleware(function (Middleware $middleware): void {
+        // Полностью отключаем CSRF на всех путях.
+        $middleware->removeFromGroup('web', ValidateCsrfToken::class);
         $middleware->validateCsrfTokens(except: ['*']);
 
         $middleware->trustProxies(
@@ -34,5 +38,27 @@ return Application::configure(basePath: dirname(__DIR__))
         );
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Логируем реальные TypeError и TokenMismatch, чтобы в laravel.log был виден стек.
+        $exceptions->render(function (TokenMismatchException $e, $request) {
+            if (function_exists('logger')) {
+                logger()->error('TokenMismatch (419): ' . $e->getMessage(), [
+                    'exception' => $e,
+                    'url' => $request->fullUrl(),
+                    'method' => $request->method(),
+                    'payload' => $request->all(),
+                ]);
+            }
+            return response()->view('errors.419', ['exception' => $e], 419);
+        });
+        $exceptions->render(function (\TypeError $e, $request) {
+            if (function_exists('logger')) {
+                logger()->error('TypeError caught as 419: ' . $e->getMessage(), [
+                    'exception' => $e,
+                    'url' => $request->fullUrl(),
+                    'method' => $request->method(),
+                    'payload' => $request->all(),
+                ]);
+            }
+            return response()->view('errors.419', ['exception' => $e], 419);
+        });
     })->create();
