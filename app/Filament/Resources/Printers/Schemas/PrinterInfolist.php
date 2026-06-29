@@ -308,14 +308,17 @@ class PrinterInfolist {
             ->modalDescription('Будет выполнен опрос принтера. Если в этом слоте есть данные SNMP, будет создан новый картридж для подтверждения.')
             ->requiresConfirmation()
             ->modalSubmitActionLabel('Опросить')
-            ->action(function (array $record, $livewire): void {
+            ->action(function ($livewire): void {
                 $printer = $livewire->getRecord();
 
                 if (! $printer instanceof Printer) {
                     throw new InvalidArgumentException('Не удалось определить принтер.');
                 }
 
-                $slotKey = (string) ($record['slot_key'] ?? '');
+                $mountedActions = $livewire->mountedActions ?? [];
+                $lastAction = end($mountedActions) ?: [];
+                $arguments = $lastAction['arguments'] ?? [];
+                $slotKey = (string) ($arguments['slot_key'] ?? '');
 
                 if ($slotKey === '') {
                     throw new InvalidArgumentException('Не удалось определить слот.');
@@ -386,20 +389,21 @@ class PrinterInfolist {
                         ?->display_name)
                     ->required(),
             ])
-            ->action(function (array $data, $livewire): void {
+            ->action(function (mixed $form, $livewire): void {
                 $printer = $livewire->getRecord();
 
                 if (! $printer instanceof Printer) {
                     throw new InvalidArgumentException('Не удалось определить принтер.');
                 }
 
-                $slotKey = (string) ($data['slot_key'] ?? '');
+                $state = $form instanceof \Filament\Forms\Form ? $form->getState() : (is_array($form) ? $form : []);
+                $slotKey = (string) ($state['slot_key'] ?? '');
 
                 if ($slotKey === '') {
                     throw new InvalidArgumentException('Не удалось определить слот.');
                 }
 
-                $serviceSupply = TonerSupply::query()->find($data['service_supply_id'] ?? null);
+                $serviceSupply = TonerSupply::query()->find($state['service_supply_id'] ?? null);
 
                 if (! $serviceSupply instanceof TonerSupply) {
                     throw new InvalidArgumentException('Картридж из пула не найден.');
